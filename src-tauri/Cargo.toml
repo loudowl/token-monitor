@@ -1,0 +1,37 @@
+[package]
+name = "token-monitor"
+version = "0.1.0"
+description = "Floating AI token usage monitor"
+authors = ["Chris Isom"]
+edition = "2021"
+
+[lib]
+name = "token_monitor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+notify = "7"
+keyring = "3"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+dirs = "6"
+walkdir = "2"
+async-trait = "0.1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
