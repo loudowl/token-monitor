@@ -192,6 +192,255 @@ fn snippet_error(status: u16, body: &str) -> String {
     format!("HTTP {status}")
 }
 
+fn json_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => {
+            let cleaned = s.replace(['$', ',', '%'], "");
+            cleaned.trim().parse().ok()
+        }
+        _ => None,
+    }
+}
+
+fn pointer_f64(root: &Value, path: &str) -> Option<f64> {
+    root.pointer(path).and_then(json_f64)
+}
+
+fn cents_to_usd(cents: f64) -> f64 {
+    cents / 100.0
+}
+
+fn ratio_pct(used: Option<f64>, limit: Option<f64>) -> Option<f64> {
+    match (used, limit) {
+        (Some(used), Some(limit)) if used.is_finite() && limit.is_finite() && limit > 0.0 => {
+            Some((used / limit * 100.0).min(999.0))
+        }
+        _ => None,
+    }
+}
+
+fn used_limit_from(obj: &Value) -> (Option<f64>, Option<f64>) {
+    if !obj.is_object() {
+        return (None, None);
+    }
+    let limit = obj
+        .get("limit")
+        .and_then(json_f64)
+        .or_else(|| obj.get("pooledLimit").and_then(json_f64))
+        .or_else(|| obj.get("individualLimit").and_then(json_f64));
+    let remaining = obj
+        .get("remaining")
+        .and_then(json_f64)
+        .or_else(|| obj.get("pooledRemaining").and_then(json_f64))
+        .or_else(|| obj.get("individualRemaining").and_then(json_f64));
+    let used = obj
+        .get("used")
+        .and_then(json_f64)
+        .or_else(|| obj.get("totalSpend").and_then(json_f64))
+        .or_else(|| obj.get("includedSpend").and_then(json_f64))
+        .or_else(|| obj.get("pooledUsed").and_then(json_f64))
+        .or_else(|| obj.get("individualUsed").and_then(json_f64))
+        .or_else(|| match (limit, remaining) {
+            (Some(limit), Some(remaining)) => Some((limit - remaining).max(0.0)),
+            _ => None,
+        });
+    (used, limit)
+}
+
+fn find_named_f64(value: &Value, name: &str) -> Option<f64> {
+    match value {
+        Value::Object(map) => {
+            if let Some(v) = map.get(name).and_then(json_f64).filter(|n| n.is_finite()) {
+                return Some(v);
+            }
+            map.values().find_map(|v| find_named_f64(v, name))
+        }
+        Value::Array(arr) => arr.iter().find_map(|v| find_named_f64(v, name)),
+        _ => None,
+    }
+}
+
+fn percent_from_message(usage: &Value) -> Option<f64> {
+    for key in [
+        "displayMessage",
+        "autoModelSelectedDisplayMessage",
+        "namedModelSelectedDisplayMessage",
+    ] {
+        let Some(msg) = usage.get(key).and_then(|x| x.as_str()) else {
+            continue;
+        };
+        let Some(idx) = msg.find('%') else {
+            continue;
+        };
+        let start = msg[..idx]
+            .rfind(|c: char| !c.is_ascii_digit() && c != '.')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        if let Ok(n) = msg[start..idx].parse::<f64>() {
+            // Team dashboards still say "You've used 0% of included usage"
+            // even when the real monthly cap is individualUsage.overall.
+            if n.is_finite() && n > 0.0 {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+fn positive_pct(pct: Option<f64>) -> Option<f64> {
+    pct.filter(|p| p.is_finite() && *p > 0.0)
+}
+
+fn is_team_shaped(usage: &Value) -> bool {
+    let membership = usage
+        .get("membershipType")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let limit_type = usage
+        .get("limitType")
+        .or_else(|| usage.pointer("/spendLimitUsage/limitType"))
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let pooled = pointer_f64(usage, "/spendLimitUsage/pooledLimit").unwrap_or(0.0) > 0.0;
+    matches!(membership.as_str(), "enterprise" | "team" | "business")
+        || limit_type == "team"
+        || pooled
+        || usage.get("teamUsage").is_some()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CycleUsage {
+    percent: Option<f64>,
+    used_usd: Option<f64>,
+    limit_usd: Option<f64>,
+    resets_at: Option<String>,
+}
+
+fn extract_cycle_usage(usage: &Value, fallback_spend_usd: f64) -> CycleUsage {
+    let resets_at = usage
+        .get("billingCycleEnd")
+        .and_then(|x| x.as_str())
+        .map(String::from);
+
+    let plan = usage
+        .pointer("/planUsage")
+        .or_else(|| usage.pointer("/individualUsage/plan"));
+    let plan_pct = plan
+        .and_then(|p| p.get("totalPercentUsed").and_then(json_f64))
+        .filter(|n| n.is_finite())
+        .or_else(|| find_named_f64(usage, "totalPercentUsed"));
+    let (plan_used, plan_limit) = plan.map(used_limit_from).unwrap_or((None, None));
+    let plan_ratio = ratio_pct(plan_used, plan_limit);
+
+    let spend_pairs = [
+        used_limit_from(usage.pointer("/individualUsage/overall").unwrap_or(&Value::Null)),
+        used_limit_from(usage.pointer("/teamUsage/pooled").unwrap_or(&Value::Null)),
+        (
+            pointer_f64(usage, "/spendLimitUsage/individualUsed"),
+            pointer_f64(usage, "/spendLimitUsage/individualLimit"),
+        ),
+        (
+            pointer_f64(usage, "/spendLimitUsage/pooledUsed"),
+            pointer_f64(usage, "/spendLimitUsage/pooledLimit"),
+        ),
+        used_limit_from(usage.pointer("/spendLimitUsage").unwrap_or(&Value::Null)),
+        used_limit_from(usage.pointer("/teamUsage/onDemand").unwrap_or(&Value::Null)),
+        used_limit_from(usage.pointer("/teamUsage/plan").unwrap_or(&Value::Null)),
+        used_limit_from(usage.pointer("/individualUsage/onDemand").unwrap_or(&Value::Null)),
+    ];
+    let (spend_used_cents, spend_limit_cents) = spend_pairs
+        .into_iter()
+        .find(|(_, limit)| limit.map(|n| n > 0.0).unwrap_or(false))
+        .unwrap_or((None, None));
+    let spend_pct = ratio_pct(spend_used_cents, spend_limit_cents);
+    let dollar_limit = pointer_f64(usage, "/perUserMonthlyLimitDollars")
+        .or_else(|| pointer_f64(usage, "/hardLimitPerUser"))
+        .or_else(|| pointer_f64(usage, "/hardLimit"))
+        .filter(|n| *n > 0.0);
+
+    let mut percent = if is_team_shaped(usage) {
+        spend_pct
+            .or_else(|| positive_pct(plan_pct))
+            .or_else(|| positive_pct(plan_ratio))
+            .or_else(|| percent_from_message(usage))
+    } else {
+        positive_pct(plan_pct)
+            .or_else(|| positive_pct(plan_ratio))
+            .or(spend_pct)
+            .or_else(|| percent_from_message(usage))
+            .or(plan_pct)
+            .or(plan_ratio)
+    };
+
+    let limit_usd = spend_limit_cents
+        .map(cents_to_usd)
+        .or(dollar_limit)
+        .or_else(|| plan_limit.map(cents_to_usd));
+    let used_usd = spend_used_cents
+        .map(cents_to_usd)
+        .or_else(|| plan_used.map(cents_to_usd))
+        .or_else(|| (fallback_spend_usd > 0.0).then_some(fallback_spend_usd));
+
+    if percent.is_none() || (percent == Some(0.0) && used_usd.unwrap_or(0.0) > 1.0) {
+        percent = ratio_pct(used_usd, limit_usd);
+    }
+
+    CycleUsage {
+        percent,
+        used_usd,
+        limit_usd,
+        resets_at,
+    }
+}
+
+fn merge_json(base: Value, incoming: Value) -> Value {
+    match (base, incoming) {
+        (Value::Null, other) => other,
+        (prev, Value::Null) => prev,
+        (Value::Object(mut a), Value::Object(b)) => {
+            for (k, v) in b {
+                let next = match a.remove(&k) {
+                    Some(prev) => merge_json(prev, v),
+                    None => v,
+                };
+                a.insert(k, next);
+            }
+            Value::Object(a)
+        }
+        (prev, _) => prev,
+    }
+}
+
+fn extract_team_ids(value: &Value) -> Vec<i64> {
+    let mut ids = Vec::new();
+    let mut push = |id: i64| {
+        if id > 0 && !ids.contains(&id) {
+            ids.push(id);
+        }
+    };
+    if let Some(id) = value.get("id").and_then(|x| x.as_i64()) {
+        push(id);
+    }
+    if let Some(id) = value.get("teamId").and_then(|x| x.as_i64()) {
+        push(id);
+    }
+    if let Some(arr) = value
+        .get("teams")
+        .or_else(|| value.get("data"))
+        .and_then(|t| t.as_array())
+    {
+        for team in arr {
+            if let Some(id) = team.get("id").or_else(|| team.get("teamId")).and_then(|x| x.as_i64()) {
+                push(id);
+            }
+        }
+    }
+    ids
+}
+
 async fn auth_me(client: &reqwest::Client, cookie_value: &str) -> Result<Option<CursorSession>, String> {
     let resp = client
         .get("https://cursor.com/api/auth/me")
@@ -274,6 +523,89 @@ async fn post_dashboard(
         return Err(snippet_error(status, &text));
     }
     serde_json::from_str(&text).map_err(|_| snippet_error(status, &text))
+}
+
+async fn get_json(
+    client: &reqwest::Client,
+    session: &CursorSession,
+    url: &str,
+) -> Result<Value, String> {
+    let resp = client
+        .get(url)
+        .header("Cookie", cookie_header(&session.cookie_value))
+        .header("Accept", "application/json")
+        .header("Origin", "https://cursor.com")
+        .header("Referer", "https://cursor.com/dashboard?tab=usage")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await.unwrap_or_default();
+    if !(200..300).contains(&status) {
+        return Err(snippet_error(status, &text));
+    }
+    serde_json::from_str(&text).map_err(|_| snippet_error(status, &text))
+}
+
+fn local_cached_team_ids() -> Vec<i64> {
+    let Ok(Some(raw)) = read_vscdb_string("cursorAuth/cachedTeam") else {
+        return Vec::new();
+    };
+    if let Ok(v) = serde_json::from_str::<Value>(&raw) {
+        return extract_team_ids(&v);
+    }
+    Vec::new()
+}
+
+async fn fetch_team_ids(client: &reqwest::Client, session: &CursorSession) -> Vec<i64> {
+    let mut ids = local_cached_team_ids();
+    // GET is 405; the dashboard uses POST.
+    if let Ok(v) = post_dashboard(client, session, "/api/dashboard/teams", serde_json::json!({})).await
+    {
+        for id in extract_team_ids(&v) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids
+}
+
+async fn fetch_usage_documents(
+    client: &reqwest::Client,
+    session: &CursorSession,
+    default_body: Value,
+    team_ids: &[i64],
+) -> Value {
+    let mut merged = Value::Null;
+    if let Ok(v) = get_json(client, session, "https://cursor.com/api/usage-summary").await {
+        merged = merge_json(merged, v);
+    }
+
+    let mut bodies = vec![serde_json::json!({}), default_body.clone()];
+    for id in team_ids {
+        let mut with_id = default_body.clone();
+        with_id["teamId"] = Value::from(*id);
+        bodies.push(with_id);
+        bodies.push(serde_json::json!({ "teamId": id }));
+    }
+
+    for body in bodies {
+        if let Ok(v) = post_dashboard(
+            client,
+            session,
+            "/api/dashboard/get-current-period-usage",
+            body.clone(),
+        )
+        .await
+        {
+            merged = merge_json(merged, v);
+        }
+        if let Ok(v) = post_dashboard(client, session, "/api/dashboard/get-hard-limit", body).await {
+            merged = merge_json(merged, v);
+        }
+    }
+    merged
 }
 
 fn parse_event_timestamp(ev: &Value) -> String {
@@ -389,48 +721,35 @@ fn ingest_events(db: &Db, events: &[Value]) -> Result<u32> {
 }
 
 fn quota_from_period(usage: &Value, db: &Db, email: Option<&str>, events: u32) -> QuotaSnapshot {
-    let plan = usage
-        .pointer("/planUsage")
-        .cloned()
-        .or_else(|| usage.pointer("/individualUsage/plan").cloned())
-        .unwrap_or(Value::Null);
-    let pct = plan
-        .get("totalPercentUsed")
-        .and_then(|x| x.as_f64())
-        .or_else(|| {
-            let used = plan.get("used").or_else(|| plan.get("totalSpend"));
-            let limit = plan.get("limit");
-            match (
-                used.and_then(|x| x.as_f64()),
-                limit.and_then(|x| x.as_f64()),
-            ) {
-                (Some(u), Some(l)) if l > 0.0 => Some((u / l * 100.0).min(999.0)),
-                _ => None,
-            }
-        });
     let spend = db.provider_month_spend("cursor").unwrap_or(0.0);
+    let cycle = extract_cycle_usage(usage, spend);
+    let used_usd = cycle.used_usd.or(Some(spend));
     let who = email.map(|e| format!(" as {e}")).unwrap_or_default();
+    let pct_label = cycle
+        .percent
+        .map(|p| format!("{p:.0}"))
+        .unwrap_or_else(|| "—".into());
+    let money = match (used_usd, cycle.limit_usd) {
+        (Some(used), Some(limit)) => format!(" · ${used:.0}/${limit:.0}"),
+        _ => String::new(),
+    };
     QuotaSnapshot {
         provider: "cursor".into(),
         label: "Cursor".into(),
-        used_percent_month: pct,
+        used_percent_month: cycle.percent,
         used_percent_year: None,
         used_tokens_month: Some(db.provider_month_tokens("cursor").unwrap_or(0)),
         limit_tokens_month: None,
-        used_usd_month: Some(spend),
-        limit_usd_month: None,
+        used_usd_month: used_usd,
+        limit_usd_month: cycle.limit_usd,
         primary_window_label: None,
         primary_window_percent: None,
         secondary_window_label: None,
         secondary_window_percent: None,
-        resets_at: usage
-            .get("billingCycleEnd")
-            .and_then(|x| x.as_str())
-            .map(String::from),
+        resets_at: cycle.resets_at,
         status: "ok".into(),
         message: Some(format!(
-            "Connected{who}. {events} runs this sync · cycle {}%",
-            pct.map(|p| format!("{p:.0}")).unwrap_or_else(|| "—".into())
+            "Connected{who}. {events} runs this sync · cycle {pct_label}%{money}"
         )),
     }
 }
@@ -490,7 +809,6 @@ async fn sync_with_session(
     let start_ms = cycle.timestamp_millis();
     let end_ms = Utc::now().timestamp_millis();
     let mut body = serde_json::json!({
-        "teamId": 0,
         "startDate": start_ms.to_string(),
         "endDate": end_ms.to_string(),
     });
@@ -498,25 +816,11 @@ async fn sync_with_session(
         body["userId"] = json_num_or_int(id);
     }
 
-    let mut period: Option<Value> = None;
-    if let Ok(v) = post_dashboard(client, session, "/api/dashboard/get-current-period-usage", body.clone()).await
-    {
-        period = Some(v);
-    } else if let Ok(v) = client
-        .get("https://cursor.com/api/usage-summary")
-        .header("Cookie", cookie_header(&session.cookie_value))
-        .header("Accept", "application/json")
-        .send()
-        .await
-    {
-        if v.status().is_success() {
-            if let Ok(text) = v.text().await {
-                if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
-                    period = Some(parsed);
-                }
-            }
-        }
+    let team_ids = fetch_team_ids(client, session).await;
+    if let Some(team_id) = team_ids.first() {
+        body["teamId"] = Value::from(*team_id);
     }
+    let period = fetch_usage_documents(client, session, body.clone(), &team_ids).await;
 
     let mut events_count = 0u32;
     for page in 1..=8 {
@@ -534,14 +838,16 @@ async fn sync_with_session(
             Ok(v) => v,
             Err(_) if page == 1 => {
                 // Broad window if the billing-cycle filter comes back empty/invalid.
-                let fallback = serde_json::json!({
-                    "teamId": 0,
+                let mut fallback = serde_json::json!({
                     "startDate": "0",
                     "endDate": "9999999999999",
                     "page": 1,
                     "pageSize": 100,
                     "userId": session.user_id,
                 });
+                if let Some(team_id) = team_ids.first() {
+                    fallback["teamId"] = Value::from(*team_id);
+                }
                 post_dashboard(
                     client,
                     session,
@@ -611,12 +917,7 @@ async fn sync_with_session(
         }
     }
 
-    let quota = quota_from_period(
-        period.as_ref().unwrap_or(&Value::Null),
-        db,
-        session.email.as_deref(),
-        events_count,
-    );
+    let quota = quota_from_period(&period, db, session.email.as_deref(), events_count);
     db.save_quota(&quota).map_err(|e| e.to_string())?;
     Ok((events_count, quota))
 }
@@ -695,5 +996,133 @@ impl Provider for CursorProvider {
             }
         }
         Ok(needs_session(None))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn personal_pro_uses_plan_percent() {
+        let usage = json!({
+            "billingCycleEnd": "2026-11-01T00:00:00.000Z",
+            "planUsage": {
+                "totalSpend": 1529,
+                "limit": 2000,
+                "totalPercentUsed": 10.19
+            }
+        });
+        let cycle = extract_cycle_usage(&usage, 0.0);
+        assert_eq!(cycle.percent, Some(10.19));
+        assert_eq!(cycle.limit_usd, Some(20.0));
+        assert!((cycle.used_usd.unwrap() - 15.29).abs() < 0.001);
+    }
+
+    #[test]
+    fn team_on_demand_limit_becomes_percent() {
+        let usage = json!({
+            "membershipType": "enterprise",
+            "limitType": "team",
+            "billingCycleEnd": "2026-11-01T00:00:00.000Z",
+            "teamUsage": {
+                "onDemand": {
+                    "enabled": true,
+                    "used": 21752,
+                    "limit": 20000,
+                    "remaining": -1752
+                }
+            }
+        });
+        let cycle = extract_cycle_usage(&usage, 0.0);
+        assert!((cycle.percent.unwrap() - 108.76).abs() < 0.01);
+        assert_eq!(cycle.limit_usd, Some(200.0));
+        assert!((cycle.used_usd.unwrap() - 217.52).abs() < 0.001);
+    }
+
+    #[test]
+    fn team_spend_limit_preferred_over_missing_plan_percent() {
+        let usage = json!({
+            "billingCycleEnd": "2026-11-01T00:00:00.000Z",
+            "spendLimitUsage": {
+                "limitType": "team",
+                "pooledUsed": 15000,
+                "pooledLimit": 20000,
+                "pooledRemaining": 5000
+            }
+        });
+        let cycle = extract_cycle_usage(&usage, 50.0);
+        assert_eq!(cycle.percent, Some(75.0));
+        assert_eq!(cycle.limit_usd, Some(200.0));
+        assert_eq!(cycle.used_usd, Some(150.0));
+    }
+
+    #[test]
+    fn usage_summary_individual_plan_still_works() {
+        let usage = json!({
+            "individualUsage": {
+                "plan": {
+                    "used": 500,
+                    "limit": 2000,
+                    "totalPercentUsed": 25.0
+                }
+            }
+        });
+        let cycle = extract_cycle_usage(&usage, 0.0);
+        assert_eq!(cycle.percent, Some(25.0));
+    }
+
+    #[test]
+    fn event_spend_fills_percent_when_only_team_limit_is_present() {
+        let usage = json!({
+            "teamUsage": {
+                "onDemand": { "limit": 20000 }
+            }
+        });
+        let cycle = extract_cycle_usage(&usage, 217.52);
+        assert!((cycle.percent.unwrap() - 108.76).abs() < 0.01);
+        assert_eq!(cycle.limit_usd, Some(200.0));
+    }
+
+    #[test]
+    fn display_message_is_last_resort() {
+        let usage = json!({
+            "displayMessage": "You've used 46% of your usage limit"
+        });
+        let cycle = extract_cycle_usage(&usage, 0.0);
+        assert_eq!(cycle.percent, Some(46.0));
+    }
+
+    #[test]
+    fn enterprise_overall_limit_beats_zero_included_message() {
+        let usage = json!({
+            "billingCycleStart": "2026-10-01T00:00:00.000Z",
+            "billingCycleEnd": "2026-11-01T00:00:00.000Z",
+            "membershipType": "enterprise",
+            "limitType": "team",
+            "autoModelSelectedDisplayMessage": "You've used 0% of your included total usage",
+            "namedModelSelectedDisplayMessage": "You've used 0% of your included API usage",
+            "individualUsage": {
+                "overall": {
+                    "enabled": true,
+                    "used": 11132,
+                    "limit": 20000,
+                    "remaining": 8868
+                }
+            },
+            "teamUsage": {
+                "onDemand": {
+                    "enabled": false,
+                    "used": 0,
+                    "limit": null,
+                    "remaining": null
+                }
+            }
+        });
+        let cycle = extract_cycle_usage(&usage, 219.40);
+        assert!((cycle.percent.unwrap() - 55.66).abs() < 0.02);
+        assert_eq!(cycle.limit_usd, Some(200.0));
+        assert!((cycle.used_usd.unwrap() - 111.32).abs() < 0.001);
     }
 }

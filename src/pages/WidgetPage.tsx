@@ -36,6 +36,9 @@ function subLabel(q: QuotaSnapshot): string | undefined {
   if (q.used_percent_year != null) {
     return `Yr ${q.used_percent_year.toFixed(0)}%`;
   }
+  if (q.used_usd_month != null && q.limit_usd_month != null) {
+    return `${formatUsd(q.used_usd_month)}/${formatUsd(q.limit_usd_month)}`;
+  }
   return undefined;
 }
 

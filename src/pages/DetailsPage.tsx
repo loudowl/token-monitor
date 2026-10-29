@@ -189,6 +189,9 @@ export default function DetailsPage() {
               <p className={clsx("text-lg", pctColor(q.used_percent_month))}>
                 Month {formatPct(q.used_percent_month)}
                 {q.used_percent_year != null ? ` · Year ${formatPct(q.used_percent_year)}` : ""}
+                {q.used_usd_month != null && q.limit_usd_month != null
+                  ? ` · ${formatUsd(q.used_usd_month)} / ${formatUsd(q.limit_usd_month)}`
+                  : ""}
               </p>
               {q.message ? (
                 <p className="text-xs text-slate-500 mt-1">{q.message}</p>
