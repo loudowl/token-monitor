@@ -12,6 +12,16 @@ import {
 } from "../api";
 import { Ring, formatUsd } from "../lib/ui";
 
+type ResizeDir =
+  | "North"
+  | "South"
+  | "East"
+  | "West"
+  | "NorthEast"
+  | "NorthWest"
+  | "SouthEast"
+  | "SouthWest";
+
 function displayPct(q: QuotaSnapshot): number | null {
   if (q.primary_window_percent != null) return q.primary_window_percent;
   return q.used_percent_month;
@@ -27,6 +37,33 @@ function subLabel(q: QuotaSnapshot): string | undefined {
     return `Yr ${q.used_percent_year.toFixed(0)}%`;
   }
   return undefined;
+}
+
+function startResize(e: React.MouseEvent, direction: ResizeDir) {
+  e.stopPropagation();
+  e.preventDefault();
+  void getCurrentWindow().startResizeDragging(direction);
+}
+
+function Edge({
+  direction,
+  className,
+  label,
+}: {
+  direction: ResizeDir;
+  className: string;
+  label: string;
+}) {
+  return (
+    <div
+      data-no-drag
+      role="separator"
+      aria-label={label}
+      title="Drag to resize"
+      onMouseDown={(e) => startResize(e, direction)}
+      className={`absolute z-20 ${className}`}
+    />
+  );
 }
 
 export default function WidgetPage() {
@@ -61,12 +98,6 @@ export default function WidgetPage() {
     await getCurrentWindow().startDragging();
   };
 
-  const startResize = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    await getCurrentWindow().startResizeDragging("SouthEast");
-  };
-
   const openDetails = (provider?: string) => showWindow("details", provider);
   const openSettings = (ev: React.MouseEvent) => {
     ev.stopPropagation();
@@ -75,12 +106,12 @@ export default function WidgetPage() {
 
   return (
     <div
-      className="h-screen w-screen p-2 select-none cursor-grab active:cursor-grabbing box-border"
+      className="h-screen w-screen p-1 select-none cursor-grab active:cursor-grabbing box-border"
       onMouseDown={onMouseDown}
       title="Drag to move · click a provider for details"
     >
       <div className="relative h-full w-full rounded-2xl border border-surface-border bg-surface shadow-2xl backdrop-blur-md px-3 py-2.5 flex flex-col">
-        <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
+        <div className="relative z-30 flex items-center justify-between gap-2 mb-2 shrink-0">
           <div
             className="cursor-pointer"
             data-no-drag
@@ -106,7 +137,7 @@ export default function WidgetPage() {
             <Settings size={14} />
           </button>
         </div>
-        <div className="flex flex-wrap gap-1 content-start overflow-auto flex-1 pb-3">
+        <div className="flex flex-wrap gap-1 content-start overflow-auto flex-1 pb-4">
           {PROVIDERS.map(({ id, label }) => {
             const q = quotasById.get(id);
             const pct = q ? displayPct(q) : null;
@@ -121,18 +152,41 @@ export default function WidgetPage() {
             );
           })}
         </div>
+
+        <Edge direction="North" label="Resize top" className="top-0 left-3 right-3 h-2 cursor-n-resize" />
+        <Edge direction="South" label="Resize bottom" className="bottom-0 left-3 right-3 h-2 cursor-s-resize" />
+        <Edge direction="West" label="Resize left" className="left-0 top-3 bottom-3 w-2 cursor-w-resize" />
+        <Edge direction="East" label="Resize right" className="right-0 top-3 bottom-3 w-2 cursor-e-resize" />
+        <Edge direction="NorthWest" label="Resize top-left" className="top-0 left-0 w-3 h-3 cursor-nw-resize" />
+        <Edge direction="NorthEast" label="Resize top-right" className="top-0 right-0 w-3 h-3 cursor-ne-resize" />
+        <Edge direction="SouthWest" label="Resize bottom-left" className="bottom-0 left-0 w-3 h-3 cursor-sw-resize" />
+
         <button
           type="button"
           data-no-drag
-          aria-label="Resize"
+          aria-label="Resize from corner"
           title="Drag to resize"
-          onMouseDown={startResize}
-          className="absolute right-1 bottom-1 w-3 h-3 cursor-se-resize opacity-60 hover:opacity-100"
-          style={{
-            background:
-              "linear-gradient(135deg, transparent 50%, rgba(148,163,184,0.9) 50%)",
-          }}
-        />
+          onMouseDown={(e) => startResize(e, "SouthEast")}
+          className="absolute right-0 bottom-0 z-30 w-8 h-8 cursor-se-resize flex items-end justify-end p-1.5 text-slate-400 hover:text-slate-200"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path
+              d="M5 13h8M9 13h4M13 9v4M13 5v8"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+            />
+            <path
+              d="M8 13h5M13 8v5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              opacity="0.45"
+            />
+          </svg>
+        </button>
       </div>
     </div>
   );
