@@ -23,7 +23,7 @@ Click the widget (or use the menu bar tray) to open a **details** view: runs sor
 |----------|------------------------|--------------|
 | **Codex** | Reads `~/.codex/sessions/**/rollout-*.jsonl` | 5h + weekly `used_percent` from logs; monthly token/cost estimates |
 | **Claude Code** | Reads `~/.claude/projects/**/*.jsonl` | Token totals + estimated $ from local sessions |
-| **Cursor** | Reads access token from Cursor `state.vscdb`; calls Cursor dashboard APIs | Monthly usage % when API works; otherwise estimates from synced events |
+| **Cursor** | `WorkosCursorSessionToken` cookie from Settings (dashboard APIs) | Included-usage % for the billing cycle + per-run cost/model |
 | **GitHub Copilot** | GitHub REST billing API + PAT in Settings | Premium request usage when PAT + username are set |
 | **ChatGPT** | Optional OpenAI **admin** key (org costs API); else **manual** plan % | Plan-based monthly %; API key adds spend from org usage |
 | **Claude.ai** | Optional Anthropic admin usage API; else manual plan % | Same pattern as ChatGPT |
@@ -89,29 +89,31 @@ Artifacts appear under `src-tauri/target/release/bundle/` (`.app` on macOS, `.ms
 
 No keys required. Use Codex / Claude Code normally; Token Monitor ingests new session logs automatically (file watcher + periodic sync).
 
-### Cursor
+### Cursor (required for personal-account %)
 
-- Stay signed in to Cursor on the same machine.
-- Token is read from Cursor’s local `state.vscdb` (read-only).
-- Dashboard endpoints are **undocumented** and may change; if sync fails, you still get estimates from any events that were synced successfully.
+Cursor has **no personal usage API key**. You do **not** need to hunt for Network requests named `usage-summary`.
+
+**Recommended:** Settings → **Sign in to Cursor**. A window opens to cursor.com. Log in (or you may already be signed in). Token Monitor reads the session cookie automatically, then shows `Cursor connected as you@email.com`.
+
+**Manual fallback** (only if sign-in window fails): Chrome DevTools → **Application** → **Cookies** → `https://cursor.com` → double-click the **Value** of `WorkosCursorSessionToken` → ⌘A ⌘C → paste in Settings.
+
+This uses Cursor’s unofficial dashboard APIs and can change without notice.
 
 ### GitHub Copilot
 
-In Settings:
+1. Set **GitHub username** in Settings (e.g. `loudowl`).
+2. Create a [fine-grained PAT](https://github.com/settings/personal-access-tokens/new) with **Account → Plan / Billing: Read**.
+3. Paste it into **GitHub PAT** and Save & sync.
 
-1. Set **GitHub username** (e.g. `loudowl`).
-2. Add a **GitHub PAT** (`github_pat`) with permission to read billing / premium request usage (fine-grained token scoped to your account as required by GitHub’s billing API).
+### ChatGPT, Claude.ai, Grok (consumer + API)
 
-### ChatGPT, Claude.ai, Grok (consumer)
+Consumer chat quotas are not public APIs. You can:
 
-1. Pick a **plan** from the catalog (prices/limits are planning aids, not live billing).
-2. Optionally enter **Manual used %** from each service’s account or usage page.
-3. Optionally add API keys for automated spend (see Settings labels):
-   - `openai_admin_key` — OpenAI organization costs API
-   - `anthropic_admin_key` — Anthropic organization usage
-   - `xai_api_key` — xAI usage endpoint
-
-Keys are stored in the **Keychain**, not in SQLite or the repo.
+1. Pick a **plan** and optionally enter **Manual used %** from each product’s own usage UI.
+2. And/or add keys in Settings (stored in Keychain):
+   - **OpenAI admin key** — [platform.openai.com admin keys](https://platform.openai.com/settings/organization/admin-keys) (org API costs)
+   - **Anthropic API key** — [console.anthropic.com keys](https://console.anthropic.com/settings/keys)
+   - **xAI API key** — [console.x.ai](https://console.x.ai/)
 
 4. Click **Save & sync**.
 
@@ -122,7 +124,7 @@ Keys are stored in the **Keychain**, not in SQLite or the repo.
 | Window | Route | How to open |
 |--------|-------|-------------|
 | Widget | `/` | Default on launch; tray → Show widget |
-| Details | `/details` | Click widget panel; tray → Usage details |
+| Details | `/details` | Click a provider ring or the title; tray → Usage details |
 | Settings | `/settings` | Gear icon; tray → Settings |
 
 **Tray menu:** Show widget · Usage details · Settings · Sync now · Quit
@@ -185,14 +187,17 @@ And `tauri.conf.json` has `"macOSPrivateApi": true`.
    - `~/.claude/projects/`
 4. For **Cursor**, confirm Cursor is installed and you are logged in; quit and reopen Token Monitor after signing in to Cursor.
 
-### Cursor usage stays at `0%` or “API unavailable”
+### Cursor usage stays at `0%`, `—`, or “setup”
 
-Cursor’s usage API is unofficial. The app falls back to:
+Use Settings → **Sign in to Cursor** instead of copying cookies. If that fails, copy `WorkosCursorSessionToken` from Application → Cookies (double-click Value, select all). You will not see request names like `usage-summary`; those are internal and often hidden.
 
-- Summing **usage events** when the dashboard endpoint responds, and/or
-- **Estimated** monthly spend vs. a default plan limit in Settings.
+### Details or Settings do not reopen after closing
 
-Check Cursor is running recent versions; API breakage may require a future app update.
+Closing those windows used to destroy them. The app now **hides** them instead, and recreates them if they were already gone. Use the **gear**, a **provider ring**, or the tray menu — they should come back. If they do not, quit from the tray and relaunch.
+
+### Widget resize
+
+The widget is resizable. Drag any edge, or the **bottom-right corner grip**. Content wraps as the window grows.
 
 ### Copilot shows “needs PAT”
 

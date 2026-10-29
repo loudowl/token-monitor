@@ -35,11 +35,13 @@ export function Ring({
   label,
   sub,
   size = 44,
+  onClick,
 }: {
   pct: number | null;
   label: string;
   sub?: string;
   size?: number;
+  onClick?: () => void;
 }) {
   const r = (size - 6) / 2;
   const c = 2 * Math.PI * r;
@@ -47,7 +49,17 @@ export function Ring({
   const offset = c - (v / 100) * c;
 
   return (
-    <div className="flex flex-col items-center gap-0.5 min-w-[52px]">
+    <div
+      className={clsx(
+        "flex flex-col items-center gap-0.5 min-w-[52px] rounded-md px-0.5",
+        onClick && "cursor-pointer hover:bg-white/5",
+      )}
+      data-no-drag={onClick ? true : undefined}
+      onClick={onClick}
+      onMouseDown={(e) => onClick && e.stopPropagation()}
+      role={onClick ? "button" : undefined}
+      title={onClick ? `Open ${label} details` : undefined}
+    >
       <div className="relative" style={{ width: size, height: size }}>
         <svg width={size} height={size} className="-rotate-90">
           <circle

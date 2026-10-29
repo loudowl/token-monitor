@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
+import { listen } from "@tauri-apps/api/event";
 import {
   getUsageSummary,
   listRuns,
@@ -39,6 +40,15 @@ export default function DetailsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const unlisten = listen<string>("details-filter", (e) => {
+      if (e.payload) setProvider(e.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   const totals = useMemo(() => {
     return runs.reduce(
@@ -122,7 +132,9 @@ export default function DetailsPage() {
             ) : runs.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
-                  No runs yet. Use your AI tools or sync from Settings.
+                  No runs for this provider yet. Add API keys in Settings and
+                  click Sync now — Codex and Claude Code also ingest local
+                  session logs automatically.
                 </td>
               </tr>
             ) : (

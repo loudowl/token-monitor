@@ -18,19 +18,19 @@ function displayPct(q: QuotaSnapshot): number | null {
 }
 
 function subLabel(q: QuotaSnapshot): string | undefined {
+  if (q.status === "needs_session" || q.status === "needs_pat") return "setup";
+  if (q.status === "manual") return "manual";
   if (q.primary_window_label && q.secondary_window_percent != null) {
     return `${q.secondary_window_label ?? "Alt"} ${q.secondary_window_percent.toFixed(0)}%`;
   }
   if (q.used_percent_year != null) {
     return `Yr ${q.used_percent_year.toFixed(0)}%`;
   }
-  if (q.status === "manual") return "manual";
   return undefined;
 }
 
 export default function WidgetPage() {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
-  const [dragging, setDragging] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -58,12 +58,16 @@ export default function WidgetPage() {
 
   const onMouseDown = async (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
-    setDragging(true);
     await getCurrentWindow().startDragging();
-    setDragging(false);
   };
 
-  const openDetails = () => showWindow("details");
+  const startResize = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    await getCurrentWindow().startResizeDragging("SouthEast");
+  };
+
+  const openDetails = (provider?: string) => showWindow("details", provider);
   const openSettings = (ev: React.MouseEvent) => {
     ev.stopPropagation();
     showWindow("settings");
@@ -71,19 +75,18 @@ export default function WidgetPage() {
 
   return (
     <div
-      className="min-h-screen p-2 select-none cursor-grab active:cursor-grabbing"
+      className="h-screen w-screen p-2 select-none cursor-grab active:cursor-grabbing box-border"
       onMouseDown={onMouseDown}
-      title="Drag to move · click panel for details"
+      title="Drag to move · click a provider for details"
     >
-      <div
-        className="rounded-2xl border border-surface-border bg-surface shadow-2xl backdrop-blur-md px-3 py-2.5 cursor-pointer"
-        onClick={openDetails}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === "Enter" && openDetails()}
-      >
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <div>
+      <div className="relative h-full w-full rounded-2xl border border-surface-border bg-surface shadow-2xl backdrop-blur-md px-3 py-2.5 flex flex-col">
+        <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
+          <div
+            className="cursor-pointer"
+            data-no-drag
+            onClick={() => openDetails()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
             <p className="text-xs font-semibold text-slate-100 tracking-tight">
               Token Monitor
             </p>
@@ -96,13 +99,14 @@ export default function WidgetPage() {
             type="button"
             data-no-drag
             onClick={openSettings}
+            onMouseDown={(e) => e.stopPropagation()}
             className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-white/5"
             aria-label="Settings"
           >
             <Settings size={14} />
           </button>
         </div>
-        <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-none">
+        <div className="flex flex-wrap gap-1 content-start overflow-auto flex-1 pb-3">
           {PROVIDERS.map(({ id, label }) => {
             const q = quotasById.get(id);
             const pct = q ? displayPct(q) : null;
@@ -111,11 +115,24 @@ export default function WidgetPage() {
                 key={id}
                 label={label}
                 pct={pct}
-                sub={q ? subLabel(q) : dragging ? undefined : "…"}
+                sub={q ? subLabel(q) : "…"}
+                onClick={() => openDetails(id)}
               />
             );
           })}
         </div>
+        <button
+          type="button"
+          data-no-drag
+          aria-label="Resize"
+          title="Drag to resize"
+          onMouseDown={startResize}
+          className="absolute right-1 bottom-1 w-3 h-3 cursor-se-resize opacity-60 hover:opacity-100"
+          style={{
+            background:
+              "linear-gradient(135deg, transparent 50%, rgba(148,163,184,0.9) 50%)",
+          }}
+        />
       </div>
     </div>
   );

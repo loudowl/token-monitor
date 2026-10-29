@@ -17,11 +17,13 @@
         "title": "Token Monitor",
         "url": "/",
         "width": 340,
-        "height": 140,
+        "height": 160,
+        "minWidth": 280,
+        "minHeight": 110,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
-        "resizable": false,
+        "resizable": true,
         "skipTaskbar": true,
         "visible": true
       },
@@ -38,8 +40,8 @@
         "label": "settings",
         "title": "Token Monitor Settings",
         "url": "/settings",
-        "width": 580,
-        "height": 680,
+        "width": 640,
+        "height": 760,
         "visible": false,
         "center": true
       }

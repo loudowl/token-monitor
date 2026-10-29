@@ -109,8 +109,27 @@ export function secretConfigured(provider: string) {
   return invoke<boolean>("secret_configured", { provider });
 }
 
-export function showWindow(label: "details" | "settings" | "widget") {
-  return invoke<void>("show_window", { label });
+export interface CursorProbeResult {
+  ok: boolean;
+  email: string | null;
+  events: number;
+  percent: number | null;
+  error: string | null;
+}
+
+export function testCursorAuth() {
+  return invoke<CursorProbeResult>("test_cursor_auth");
+}
+
+export function connectCursor() {
+  return invoke<CursorProbeResult>("connect_cursor");
+}
+
+export function showWindow(
+  label: "details" | "settings" | "widget",
+  provider?: string,
+) {
+  return invoke<void>("show_window", { label, provider: provider ?? null });
 }
 
 export function saveWidgetPosition(x: number, y: number) {
