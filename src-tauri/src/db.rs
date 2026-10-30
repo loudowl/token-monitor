@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::models::{AppSettings, QuotaSnapshot, RunRecord};
+use crate::models::{AppSettings, ModelUsageRow, QuotaSnapshot, RunRecord};
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -97,10 +97,11 @@ impl Db {
         sort: &str,
     ) -> Result<Vec<RunRecord>> {
         let conn = self.conn.lock().unwrap();
-        let order = if sort == "started_at" {
-            "started_at DESC"
-        } else {
-            "cost_usd DESC, started_at DESC"
+        let order = match sort {
+            "started_at" => "started_at DESC",
+            "cost_asc" => "cost_usd ASC, started_at DESC",
+            "model" => "model ASC, started_at DESC",
+            _ => "cost_usd DESC, started_at DESC",
         };
         let sql = if let Some(p) = provider {
             format!(
@@ -154,6 +155,46 @@ impl Db {
         Ok(v)
     }
 
+    pub fn provider_model_breakdown(
+        &self,
+        provider: &str,
+        anchor_day: u8,
+    ) -> Result<Vec<ModelUsageRow>> {
+        let conn = self.conn.lock().unwrap();
+        let start = billing_cycle_start(Utc::now(), anchor_day);
+        let start_s = start.to_rfc3339();
+        let mut stmt = conn.prepare(
+            "SELECT model, COALESCE(SUM(cost_usd), 0)
+             FROM runs
+             WHERE provider = ?1 AND started_at >= ?2
+             GROUP BY model
+             ORDER BY SUM(cost_usd) DESC",
+        )?;
+        let rows = stmt.query_map(params![provider, start_s], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))
+        })?;
+        let mut items = Vec::new();
+        for r in rows {
+            items.push(r?);
+        }
+        let total: f64 = items.iter().map(|(_, c)| c).sum();
+        Ok(items
+            .into_iter()
+            .map(|(model, cost_usd)| {
+                let share_percent = if total > 0.0 {
+                    (cost_usd / total) * 100.0
+                } else {
+                    0.0
+                };
+                ModelUsageRow {
+                    model,
+                    cost_usd,
+                    share_percent,
+                }
+            })
+            .collect())
+    }
+
     pub fn provider_month_spend(&self, provider: &str) -> Result<f64> {
         let conn = self.conn.lock().unwrap();
         let start = billing_cycle_start(Utc::now(), 1);
@@ -177,6 +218,15 @@ impl Db {
             |r| r.get(0),
         )?;
         Ok(v)
+    }
+
+    pub fn delete_runs_with_title_prefix(&self, provider: &str, prefix: &str) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "DELETE FROM runs WHERE provider = ?1 AND title LIKE ?2",
+            params![provider, format!("{prefix}%")],
+        )?;
+        Ok(n)
     }
 
     pub fn save_quota(&self, quota: &QuotaSnapshot) -> Result<()> {

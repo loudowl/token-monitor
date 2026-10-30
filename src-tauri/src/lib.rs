@@ -14,7 +14,7 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 
 use crate::db::Db;
-use crate::models::{AppSettings, RunRecord, UsageSummary};
+use crate::models::{AppSettings, ModelUsageRow, RunRecord, UsageSummary};
 use crate::pricing::plan_catalog;
 use crate::sync::{SyncEngine, spawn_file_watchers, spawn_poll_loop};
 
@@ -48,6 +48,18 @@ fn list_runs(
     state
         .db
         .list_runs(provider.as_deref(), limit.unwrap_or(200), &sort)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_provider_model_usage(
+    state: State<'_, AppState>,
+    provider: String,
+) -> Result<Vec<ModelUsageRow>, String> {
+    let settings = state.db.load_settings().map_err(|e| e.to_string())?;
+    state
+        .db
+        .provider_model_breakdown(&provider, settings.billing_anchor_day)
         .map_err(|e| e.to_string())
 }
 
@@ -409,6 +421,7 @@ pub fn run() {
             get_usage_summary,
             sync_now,
             list_runs,
+            get_provider_model_usage,
             get_settings,
             save_settings,
             get_plan_catalog,

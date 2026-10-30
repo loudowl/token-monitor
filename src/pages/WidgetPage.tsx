@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Settings } from "lucide-react";
 import {
@@ -69,8 +69,26 @@ function Edge({
   );
 }
 
+const RING_MIN = 34;
+const RING_MAX = 112;
+const RING_LABEL_STACK = 36;
+
+function ringSizeForArea(width: number, height: number, count: number) {
+  if (width < 1 || height < 1) return 44;
+  const minCell = 52;
+  const cols = Math.max(1, Math.min(count, Math.floor(width / minCell)));
+  const rows = Math.ceil(count / cols);
+  const cellW = width / cols;
+  const cellH = height / rows;
+  const fromW = cellW - 6;
+  const fromH = cellH - RING_LABEL_STACK;
+  return Math.floor(Math.max(RING_MIN, Math.min(RING_MAX, fromW, fromH)));
+}
+
 export default function WidgetPage() {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
+  const ringsHostRef = useRef<HTMLDivElement>(null);
+  const [ringSize, setRingSize] = useState(44);
 
   const refresh = useCallback(async () => {
     try {
@@ -89,6 +107,19 @@ export default function WidgetPage() {
       window.clearInterval(id);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    const el = ringsHostRef.current;
+    if (!el) return;
+    const update = () => {
+      const { width, height } = el.getBoundingClientRect();
+      setRingSize(ringSizeForArea(width, height, PROVIDERS.length));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const quotasById = useMemo(() => {
     const m = new Map<string, QuotaSnapshot>();
@@ -140,20 +171,26 @@ export default function WidgetPage() {
             <Settings size={14} />
           </button>
         </div>
-        <div className="flex flex-wrap gap-1 content-start overflow-auto flex-1 pb-4">
-          {PROVIDERS.map(({ id, label }) => {
-            const q = quotasById.get(id);
-            const pct = q ? displayPct(q) : null;
-            return (
-              <Ring
-                key={id}
-                label={label}
-                pct={pct}
-                sub={q ? subLabel(q) : "…"}
-                onClick={() => openDetails(id)}
-              />
-            );
-          })}
+        <div
+          ref={ringsHostRef}
+          className="flex-1 min-h-0 flex items-center justify-center overflow-hidden pb-1"
+        >
+          <div className="flex flex-wrap gap-x-1 gap-y-1.5 justify-center items-center content-center max-w-full max-h-full overflow-auto px-1">
+            {PROVIDERS.map(({ id, label }) => {
+              const q = quotasById.get(id);
+              const pct = q ? displayPct(q) : null;
+              return (
+                <Ring
+                  key={id}
+                  label={label}
+                  pct={pct}
+                  size={ringSize}
+                  sub={q ? subLabel(q) : "…"}
+                  onClick={() => openDetails(id)}
+                />
+              );
+            })}
+          </div>
         </div>
 
         <Edge direction="North" label="Resize top" className="top-0 left-3 right-3 h-2 cursor-n-resize" />

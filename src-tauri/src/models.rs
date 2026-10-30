@@ -14,6 +14,13 @@ pub struct RunRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelUsageRow {
+    pub model: String,
+    pub cost_usd: f64,
+    pub share_percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuotaSnapshot {
     pub provider: String,
     pub label: String,

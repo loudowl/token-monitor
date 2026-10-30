@@ -4,7 +4,10 @@ use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::fs;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 
 use std::sync::Mutex;
 
@@ -683,9 +686,325 @@ fn parse_event_tokens(ev: &Value) -> (i64, i64, i64) {
     (input, output, cache)
 }
 
-fn ingest_events(db: &Db, events: &[Value]) -> Result<u32> {
+fn collapse_preview(s: &str, max: usize) -> String {
+    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out: String = flat.chars().take(max).collect();
+    if flat.chars().count() > max {
+        out.push('…');
+    }
+    out
+}
+
+fn extract_tagged(text: &str, tag: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = lower.find(&open)? + open.len();
+    let end = lower.get(start..)?.find(&close)? + start;
+    let inner = text.get(start..end)?.trim();
+    if inner.is_empty() {
+        None
+    } else {
+        Some(inner.to_string())
+    }
+}
+
+fn strip_xml_tags(text: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in text.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn clean_prompt_text(text: &str) -> String {
+    let body = extract_tagged(text, "user_query")
+        .or_else(|| extract_tagged(text, "user-query"))
+        .unwrap_or_else(|| strip_xml_tags(text));
+    collapse_preview(&body, 80)
+}
+
+fn humanize_kind(kind: &str) -> String {
+    let trimmed = kind.trim_start_matches("USAGE_EVENT_KIND_").replace('_', " ");
+    trimmed
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn user_message_text(value: &Value) -> Option<String> {
+    let msg = value.get("message")?;
+    if let Some(s) = msg.as_str() {
+        return Some(s.to_string());
+    }
+    let content = msg.get("content")?;
+    if let Some(s) = content.as_str() {
+        return Some(s.to_string());
+    }
+    let arr = content.as_array()?;
+    for part in arr {
+        if let Some(text) = part.get("text").and_then(|x| x.as_str()) {
+            if !text.trim().is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn prompt_body(raw: &str) -> Option<String> {
+    let body = extract_tagged(raw, "user_query")
+        .or_else(|| extract_tagged(raw, "user-query"))
+        .unwrap_or_else(|| strip_xml_tags(raw));
+    let flat: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.len() < 8 {
+        None
+    } else {
+        Some(flat)
+    }
+}
+
+fn is_main_agent_transcript(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let Some(grandparent) = parent.parent() else {
+        return false;
+    };
+    grandparent.file_name().and_then(|n| n.to_str()) == Some("agent-transcripts")
+        && parent.file_name().and_then(|n| n.to_str()) == path.file_stem().and_then(|n| n.to_str())
+}
+
+fn all_user_prompts_from_transcript(path: &Path) -> Vec<String> {
+    let Ok(file) = fs::File::open(path) else {
+        return Vec::new();
+    };
+    let mut prompts = Vec::new();
+    let mut last = String::new();
+    for line in BufReader::new(file).lines() {
+        let Ok(line) = line else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if v.get("role").and_then(|r| r.as_str()) != Some("user") {
+            continue;
+        }
+        let Some(text) = user_message_text(&v) else {
+            continue;
+        };
+        let Some(body) = prompt_body(&text) else {
+            continue;
+        };
+        if body == last {
+            continue;
+        }
+        prompts.push(body.clone());
+        last = body;
+    }
+    prompts
+}
+
+fn remember_prompts(
+    prompts: &mut HashMap<String, Vec<String>>,
+    ranks: &mut HashMap<String, u8>,
+    id: &str,
+    entries: Vec<String>,
+    rank: u8,
+) {
+    let id = id.trim();
+    if id.is_empty() || entries.is_empty() {
+        return;
+    }
+    if ranks.get(id).copied().unwrap_or(u8::MAX) <= rank {
+        return;
+    }
+    ranks.insert(id.to_string(), rank);
+    prompts.insert(id.to_string(), entries);
+}
+
+fn load_conversation_prompts() -> HashMap<String, Vec<String>> {
+    let mut prompts = HashMap::new();
+    let mut ranks = HashMap::new();
+    let Some(home) = dirs::home_dir() else {
+        return prompts;
+    };
+
+    let projects = home.join(".cursor").join("projects");
+    if projects.exists() {
+        for entry in walkdir::WalkDir::new(&projects).max_depth(4).into_iter().flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") || !is_main_agent_transcript(path)
+            {
+                continue;
+            }
+            let Some(id) = path.file_stem().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let entries = all_user_prompts_from_transcript(path);
+            remember_prompts(&mut prompts, &mut ranks, id, entries, 0);
+        }
+    }
+
+    let chats = home.join(".cursor").join("chats");
+    if chats.exists() {
+        for entry in walkdir::WalkDir::new(&chats).max_depth(3).into_iter().flatten() {
+            if entry.file_name() != "meta.json" {
+                continue;
+            }
+            let Ok(raw) = fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let Ok(v) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            if let Some(title) = v.get("title").and_then(|t| t.as_str()) {
+                if let Some(id) = entry.path().parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())
+                {
+                    if let Some(body) = prompt_body(title) {
+                        remember_prompts(&mut prompts, &mut ranks, id, vec![body], 1);
+                    }
+                }
+            }
+        }
+    }
+
+    let workspaces = home
+        .join("Library")
+        .join("Application Support")
+        .join("Cursor")
+        .join("User")
+        .join("workspaceStorage");
+    if workspaces.exists() {
+        for entry in walkdir::WalkDir::new(&workspaces).max_depth(2).into_iter().flatten() {
+            if entry.file_name() != "state.vscdb" {
+                continue;
+            }
+            let Ok(conn) = Connection::open_with_flags(
+                entry.path(),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            ) else {
+                continue;
+            };
+            let Ok(raw) = conn.query_row(
+                "SELECT value FROM ItemTable WHERE key = 'composer.composerData'",
+                [],
+                |r| r.get::<_, String>(0),
+            ) else {
+                continue;
+            };
+            let Ok(data) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            let Some(composers) = data.get("allComposers").and_then(|c| c.as_array()) else {
+                continue;
+            };
+            for composer in composers {
+                let Some(id) = composer.get("composerId").and_then(|x| x.as_str()) else {
+                    continue;
+                };
+                if let Some(name) = composer.get("name").and_then(|x| x.as_str()) {
+                    if let Some(body) = prompt_body(name) {
+                        remember_prompts(&mut prompts, &mut ranks, id, vec![body], 2);
+                    }
+                } else if let Some(subtitle) = composer.get("subtitle").and_then(|x| x.as_str()) {
+                    if let Some(body) = prompt_body(subtitle) {
+                        remember_prompts(&mut prompts, &mut ranks, id, vec![body], 3);
+                    }
+                }
+            }
+        }
+    }
+
+    prompts
+}
+
+fn conversation_id(ev: &Value) -> Option<&str> {
+    ev.get("conversationId")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty() && *s != "null")
+}
+
+fn event_timestamp_ms(ev: &Value) -> i64 {
+    let raw = ev
+        .get("timestamp")
+        .or_else(|| ev.get("createdAt"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    if let Some(s) = raw.as_str() {
+        if let Ok(ms) = s.parse::<i64>() {
+            return ms;
+        }
+    }
+    raw.as_i64().unwrap_or(0)
+}
+
+fn fallback_title(ev: &Value) -> String {
+    if let Some(id) = conversation_id(ev) {
+        return format!("Chat {}", &id[..id.len().min(8)]);
+    }
+    ev.get("kind")
+        .and_then(|k| k.as_str())
+        .map(humanize_kind)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Cursor request".into())
+}
+
+fn assign_event_titles(events: &[Value], prompts: &HashMap<String, Vec<String>>) -> Vec<String> {
+    let mut titles = vec![String::new(); events.len()];
+    let mut groups: HashMap<String, Vec<(i64, usize)>> = HashMap::new();
+
+    for (idx, ev) in events.iter().enumerate() {
+        if let Some(id) = conversation_id(ev) {
+            groups
+                .entry(id.to_string())
+                .or_default()
+                .push((event_timestamp_ms(ev), idx));
+        } else {
+            titles[idx] = fallback_title(ev);
+        }
+    }
+
+    for (id, mut items) in groups {
+        items.sort_by_key(|(ts, _)| *ts);
+        let n = items.len().max(1);
+        if let Some(list) = prompts.get(&id).filter(|l| !l.is_empty()) {
+            let m = list.len();
+            for (i, (_, idx)) in items.iter().enumerate() {
+                let prompt_idx = if m == 1 {
+                    0
+                } else {
+                    ((i * m) / n).min(m - 1)
+                };
+                titles[*idx] = collapse_preview(&list[prompt_idx], 80);
+            }
+        } else {
+            for (_, idx) in &items {
+                titles[*idx] = format!("Chat {}", &id[..id.len().min(8)]);
+            }
+        }
+    }
+
+    titles
+}
+
+fn ingest_events(db: &Db, events: &[Value], titles: &[String]) -> Result<u32> {
     let mut n = 0u32;
-    for ev in events {
+    for (ev, title) in events.iter().zip(titles.iter()) {
         let started = parse_event_timestamp(ev);
         let model = ev
             .get("model")
@@ -695,15 +1014,12 @@ fn ingest_events(db: &Db, events: &[Value]) -> Result<u32> {
         let run_id = ev
             .get("requestId")
             .or_else(|| ev.get("id"))
+            .or_else(|| ev.get("usageEventId"))
             .and_then(|x| x.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("{started}-{model}-{n}"));
         let (input, output, cache) = parse_event_tokens(ev);
         let cost = parse_event_cost(ev);
-        let kind = ev
-            .get("kind")
-            .and_then(|k| k.as_str())
-            .unwrap_or("Cursor request");
         db.upsert_run(&RunRecord {
             provider: "cursor".into(),
             run_id,
@@ -713,7 +1029,11 @@ fn ingest_events(db: &Db, events: &[Value]) -> Result<u32> {
             output_tokens: output,
             cache_tokens: cache,
             cost_usd: cost,
-            title: kind.to_string(),
+            title: if title.is_empty() {
+                fallback_title(ev)
+            } else {
+                title.clone()
+            },
         })?;
         n += 1;
     }
@@ -821,8 +1141,9 @@ async fn sync_with_session(
         body["teamId"] = Value::from(*team_id);
     }
     let period = fetch_usage_documents(client, session, body.clone(), &team_ids).await;
+    let prompts = load_conversation_prompts();
+    let mut all_events = Vec::new();
 
-    let mut events_count = 0u32;
     for page in 1..=8 {
         let mut page_body = body.clone();
         page_body["page"] = Value::from(page);
@@ -865,11 +1186,16 @@ async fn sync_with_session(
             .cloned()
             .unwrap_or_default();
         let n = events.len();
-        events_count += ingest_events(db, &events).map_err(|e| e.to_string())?;
+        all_events.extend(events);
         if n < 100 {
             break;
         }
     }
+
+    let titles = assign_event_titles(&all_events, &prompts);
+    let mut events_count =
+        ingest_events(db, &all_events, &titles).map_err(|e| e.to_string())? as u32;
+    let _ = db.delete_runs_with_title_prefix("cursor", "USAGE_EVENT_KIND");
 
     if events_count == 0 {
         if let Ok(agg) = post_dashboard(
@@ -1003,6 +1329,7 @@ impl Provider for CursorProvider {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::HashMap;
 
     #[test]
     fn personal_pro_uses_plan_percent() {
@@ -1092,6 +1419,73 @@ mod tests {
         });
         let cycle = extract_cycle_usage(&usage, 0.0);
         assert_eq!(cycle.percent, Some(46.0));
+    }
+
+    #[test]
+    fn assign_event_titles_maps_later_calls_to_later_prompts() {
+        let mut prompts = HashMap::new();
+        prompts.insert(
+            "conv-1".into(),
+            vec![
+                "how can i layout this ide".into(),
+                "never mind".into(),
+                "fix the live blog bug".into(),
+            ],
+        );
+        let events = vec![
+            json!({"conversationId":"conv-1","timestamp":"1000"}),
+            json!({"conversationId":"conv-1","timestamp":"2000"}),
+            json!({"conversationId":"conv-1","timestamp":"3000"}),
+        ];
+        let titles = assign_event_titles(&events, &prompts);
+        assert!(titles[0].contains("layout"));
+        assert!(titles[1].contains("never mind"));
+        assert!(titles[2].contains("live blog"));
+    }
+
+    #[test]
+    fn assign_event_titles_falls_back_without_transcript() {
+        let events = vec![json!({
+            "conversationId":"fbcfb9bd-843c-4e4d-b30e-2a5227d5eedc",
+            "kind":"USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS"
+        })];
+        let titles = assign_event_titles(&events, &HashMap::new());
+        assert_eq!(titles[0], "Chat fbcfb9bd");
+    }
+
+    #[test]
+    fn fallback_title_humanizes_kind_when_conversation_is_missing() {
+        let ev = json!({ "kind": "USAGE_EVENT_KIND_INCLUDED_IN_BUSINESS" });
+        assert_eq!(fallback_title(&ev), "Included In Business");
+    }
+
+    #[test]
+    fn user_message_preview_reads_transcript_shape() {
+        let v = json!({
+            "role": "user",
+            "message": { "content": [{ "type": "text", "text": "can you debug why the cursor circle is empty" }] }
+        });
+        assert_eq!(
+            user_message_text(&v).as_deref(),
+            Some("can you debug why the cursor circle is empty")
+        );
+        assert_eq!(
+            collapse_preview(user_message_text(&v).unwrap().as_str(), 20),
+            "can you debug why th…"
+        );
+    }
+
+    #[test]
+    fn clean_prompt_extracts_user_query_and_drops_xml() {
+        let raw = "<timestamp>Thursday, Oct 29, 2026, 4:36 PM (UTC-7)</timestamp>\n<user_query>\ncan you debug why the cursor circle is empty\n</user_query>";
+        assert_eq!(
+            clean_prompt_text(raw),
+            "can you debug why the cursor circle is empty"
+        );
+        assert_eq!(
+            clean_prompt_text("<user_query> how can i layout this ide with the agent dialog on the right and files on the left</user_query>"),
+            "how can i layout this ide with the agent dialog on the right and files on the le…"
+        );
     }
 
     #[test]

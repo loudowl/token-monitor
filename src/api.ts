@@ -37,6 +37,12 @@ export interface UsageSummary {
   month_spend_usd: number;
 }
 
+export interface ModelUsageRow {
+  model: string;
+  cost_usd: number;
+  share_percent: number;
+}
+
 export interface ManualPlanEntry {
   provider: string;
   plan_id: string;
@@ -87,6 +93,10 @@ export function listRuns(opts?: {
   sort?: string;
 }) {
   return invoke<RunRecord[]>("list_runs", { ...opts });
+}
+
+export function getProviderModelUsage(provider: string) {
+  return invoke<ModelUsageRow[]>("get_provider_model_usage", { provider });
 }
 
 export function getSettings() {
