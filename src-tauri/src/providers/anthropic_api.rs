@@ -64,6 +64,9 @@ impl Provider for AnthropicProvider {
                     cache_tokens: 0,
                     cost_usd: cost,
                     title: "Anthropic admin usage".into(),
+                    conversation_id: String::new(),
+                    task_context: String::new(),
+                    task_inherited: false,
                 })?;
             }
         }

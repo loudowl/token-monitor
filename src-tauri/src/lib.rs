@@ -1,9 +1,11 @@
+mod advice;
 mod db;
 mod keychain;
 mod models;
 mod pricing;
 mod providers;
 mod sync;
+mod task_context;
 
 use std::sync::Arc;
 use tauri::{
@@ -14,7 +16,7 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 
 use crate::db::Db;
-use crate::models::{AppSettings, ModelUsageRow, RunRecord, UsageSummary};
+use crate::models::{AppSettings, ModelUsageAdvice, ModelUsageRow, ModelUsageSeries, RunRecord, UsageSummary};
 use crate::pricing::plan_catalog;
 use crate::sync::{SyncEngine, spawn_file_watchers, spawn_poll_loop};
 
@@ -41,13 +43,30 @@ async fn sync_now(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<U
 fn list_runs(
     state: State<'_, AppState>,
     provider: Option<String>,
+    model: Option<String>,
     limit: Option<u32>,
     sort: Option<String>,
 ) -> Result<Vec<RunRecord>, String> {
     let sort = sort.unwrap_or_else(|| "cost".into());
     state
         .db
-        .list_runs(provider.as_deref(), limit.unwrap_or(200), &sort)
+        .list_runs(
+            provider.as_deref(),
+            model.as_deref(),
+            limit.unwrap_or(200),
+            &sort,
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_used_models(
+    state: State<'_, AppState>,
+    provider: Option<String>,
+) -> Result<Vec<String>, String> {
+    state
+        .db
+        .list_used_models(provider.as_deref())
         .map_err(|e| e.to_string())
 }
 
@@ -60,6 +79,27 @@ fn get_provider_model_usage(
     state
         .db
         .provider_model_breakdown(&provider, settings.billing_anchor_day)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_provider_model_usage_series(
+    state: State<'_, AppState>,
+    provider: String,
+) -> Result<ModelUsageSeries, String> {
+    let settings = state.db.load_settings().map_err(|e| e.to_string())?;
+    state
+        .db
+        .provider_model_series(&provider, settings.billing_anchor_day)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn generate_cursor_model_advice(
+    state: State<'_, AppState>,
+) -> Result<ModelUsageAdvice, String> {
+    let settings = state.db.load_settings().map_err(|e| e.to_string())?;
+    advice::generate_cursor_advice(state.db.as_ref(), settings.billing_anchor_day)
         .map_err(|e| e.to_string())
 }
 
@@ -98,6 +138,12 @@ fn secret_configured(provider: String) -> Result<bool, String> {
 async fn test_cursor_auth(state: State<'_, AppState>) -> Result<crate::providers::cursor::CursorProbeResult, String> {
     let settings = state.db.load_settings().map_err(|e| e.to_string())?;
     Ok(crate::providers::cursor::CursorProvider::probe(state.db.as_ref(), &settings).await)
+}
+
+#[tauri::command]
+async fn test_copilot_auth(state: State<'_, AppState>) -> Result<crate::providers::copilot::CopilotProbeResult, String> {
+    let settings = state.db.load_settings().map_err(|e| e.to_string())?;
+    Ok(crate::providers::copilot::CopilotProvider::probe(&settings).await)
 }
 
 fn is_cursor_session_cookie(name: &str, value: &str) -> bool {
@@ -331,6 +377,11 @@ fn recreate_window(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
 
     if label != "widget" {
         builder = builder.center();
+        if label == "details" {
+            builder = builder.min_inner_size(520.0, 400.0);
+        } else if label == "settings" {
+            builder = builder.min_inner_size(420.0, 480.0);
+        }
     } else {
         builder = builder.min_inner_size(280.0, 110.0);
     }
@@ -421,13 +472,17 @@ pub fn run() {
             get_usage_summary,
             sync_now,
             list_runs,
+            list_used_models,
             get_provider_model_usage,
+            get_provider_model_usage_series,
+            generate_cursor_model_advice,
             get_settings,
             save_settings,
             get_plan_catalog,
             set_secret,
             secret_configured,
             test_cursor_auth,
+            test_copilot_auth,
             connect_cursor,
             show_window,
             hide_window,

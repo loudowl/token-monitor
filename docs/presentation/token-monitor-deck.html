@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Token Monitor — Product Deck</title>
+  <style>
+    :root {
+      --bg: #020617;
+      --panel: #0f172a;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --indigo: #818cf8;
+      --emerald: #34d399;
+      --amber: #fbbf24;
+      --font: "Inter", system-ui, -apple-system, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      overflow: hidden;
+    }
+
+    .deck-bg {
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    .deck-bg .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.35;
+    }
+
+    .deck-bg .orb-a { width: 420px; height: 420px; background: #4338ca; top: -120px; right: -80px; }
+    .deck-bg .orb-b { width: 320px; height: 320px; background: #059669; bottom: -100px; left: -60px; opacity: 0.22; }
+
+    .deck {
+      height: 100vh;
+      width: 100vw;
+      position: relative;
+      z-index: 1;
+    }
+
+    .slide {
+      display: none;
+      height: 100%;
+      padding: 2.5rem 4rem 5rem;
+      flex-direction: column;
+      justify-content: center;
+      max-width: 1100px;
+      margin: 0 auto;
+      animation: fade 0.35s ease;
+      position: relative;
+    }
+
+    .slide.active { display: flex; }
+
+    .slide-watermark {
+      position: absolute;
+      right: 2rem;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: clamp(5rem, 14vw, 9rem);
+      opacity: 0.07;
+      line-height: 1;
+      user-select: none;
+    }
+
+    @keyframes fade {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .slide-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 1.25rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .slide-icon {
+      flex-shrink: 0;
+      width: 56px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.85rem;
+      background: rgba(129, 140, 248, 0.12);
+      border: 1px solid rgba(129, 140, 248, 0.35);
+      border-radius: 14px;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 4vw, 2.75rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.75rem;
+      line-height: 1.15;
+    }
+
+    h2 {
+      font-size: clamp(1.35rem, 2.8vw, 1.85rem);
+      font-weight: 600;
+      color: var(--text);
+      margin: 0;
+      line-height: 1.25;
+    }
+
+    h2 .hl { color: var(--indigo); }
+
+    .kicker {
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .pitch {
+      font-size: 1.05rem;
+      line-height: 1.55;
+      color: var(--muted);
+      max-width: 52rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .pitch strong { color: var(--text); }
+
+    ul.features {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 0.5rem;
+      max-width: 42rem;
+    }
+
+    ul.features li {
+      padding-left: 2rem;
+      position: relative;
+      line-height: 1.45;
+      color: var(--text);
+      font-size: 0.98rem;
+    }
+
+    ul.features li .fe {
+      position: absolute;
+      left: 0;
+      top: 0.05em;
+      font-size: 1.1rem;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      align-items: start;
+      width: 100%;
+    }
+
+    @media (max-width: 800px) {
+      .slide { padding: 2rem 1.5rem 4.5rem; }
+      .two-col { grid-template-columns: 1fr; }
+      .slide-watermark { display: none; }
+    }
+
+    .card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.35rem;
+    }
+
+    .card h3 {
+      margin: 0 0 0.65rem;
+      font-size: 0.95rem;
+      color: var(--indigo);
+    }
+
+    .card p, .card li {
+      font-size: 0.92rem;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+
+    .card ul { margin: 0; padding-left: 1.1rem; }
+
+    .productivity {
+      border-left: 3px solid var(--emerald);
+      padding: 0.75rem 0 0.75rem 1rem;
+      margin-top: 1rem;
+      font-size: 0.92rem;
+      color: #a7f3d0;
+      line-height: 1.5;
+      background: rgba(52, 211, 153, 0.06);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .productivity strong { color: var(--emerald); }
+
+    .mock {
+      font-family: ui-monospace, monospace;
+      font-size: 0.78rem;
+      line-height: 1.55;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+    }
+
+    .mock .em { color: var(--emerald); }
+    .mock .key { color: var(--indigo); }
+
+    .nav {
+      position: fixed;
+      bottom: 1.25rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.45rem 0.85rem;
+      backdrop-filter: blur(8px);
+      z-index: 10;
+    }
+
+    .nav button {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.35rem 0.85rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .nav button:hover { border-color: var(--indigo); color: var(--indigo); }
+
+    .nav .counter {
+      font-size: 0.8rem;
+      color: var(--muted);
+      min-width: 4rem;
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: rgba(129, 140, 248, 0.15);
+      color: var(--indigo);
+      padding: 0.25rem 0.55rem;
+      border-radius: 4px;
+      margin-bottom: 0.65rem;
+    }
+
+    .title-sub {
+      font-size: 1rem;
+      color: var(--muted);
+      margin-bottom: 1.25rem;
+    }
+
+    .hero-rings {
+      display: flex;
+      gap: 0.65rem;
+      flex-wrap: wrap;
+      margin: 1rem 0 1.25rem;
+    }
+
+    .hero-rings svg { width: 52px; height: 52px; }
+
+    .intro-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 2rem;
+      align-items: center;
+      width: 100%;
+    }
+
+    @media (max-width: 900px) {
+      .intro-row { grid-template-columns: 1fr; }
+    }
+
+    .graphic-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1.25rem;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px dashed var(--border);
+      border-radius: 16px;
+      min-width: 200px;
+    }
+
+    .graphic-panel .caption {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .chart-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      height: 80px;
+      padding: 0 0.5rem;
+    }
+
+    .chart-bars span {
+      width: 14px;
+      border-radius: 4px 4px 0 0;
+      background: linear-gradient(to top, #4338ca, var(--indigo));
+    }
+
+    .chart-bars span:nth-child(2) { height: 45%; opacity: 0.7; }
+    .chart-bars span:nth-child(3) { height: 90%; }
+    .chart-bars span:nth-child(4) { height: 60%; opacity: 0.85; }
+    .chart-bars span:nth-child(5) { height: 35%; background: linear-gradient(to top, #047857, var(--emerald)); }
+
+    .mini-widget {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0.65rem 0.85rem;
+      background: rgba(2, 6, 23, 0.8);
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .mini-widget strong { color: var(--text); display: block; margin-bottom: 0.35rem; }
+  </style>
+</head>
+<body>
+  <div class="deck-bg" aria-hidden="true">
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+  </div>
+
+  <div class="deck" id="deck">
+
+    <section class="slide active" data-slide="1">
+      <span class="slide-watermark" aria-hidden="true">💰</span>
+      <p class="kicker">📊 Token Monitor</p>
+      <div class="intro-row">
+        <div>
+          <h1>👀 See every AI dollar.<br />🎯 Spend the next one on purpose.</h1>
+          <p class="title-sub">🖥️ Local desktop utility · macOS · FTS / Cursor power users</p>
+          <p class="pitch">
+            <strong>Token Monitor</strong> is a floating always-on-top widget plus details dashboard
+            that aggregates usage across <strong>Cursor, Codex, Claude Code, Copilot</strong>, and more.
+            It runs entirely on your machine—🔒 SQLite + Keychain—so you can coach yourself on
+            <strong>model choice, ticket focus, and burn rate</strong> without waiting for a vendor invoice.
+          </p>
+          <div class="hero-rings" aria-hidden="true">
+            <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="22" fill="none" stroke="#334155" stroke-width="5"/><circle cx="26" cy="26" r="22" fill="none" stroke="#818cf8" stroke-width="5" stroke-dasharray="100 38" transform="rotate(-90 26 26)"/></svg>
+            <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="22" fill="none" stroke="#334155" stroke-width="5"/><circle cx="26" cy="26" r="22" fill="none" stroke="#34d399" stroke-width="5" stroke-dasharray="70 68" transform="rotate(-90 26 26)"/></svg>
+            <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="22" fill="none" stroke="#334155" stroke-width="5"/><circle cx="26" cy="26" r="22" fill="none" stroke="#fbbf24" stroke-width="5" stroke-dasharray="45 93" transform="rotate(-90 26 26)"/></svg>
+          </div>
+          <ul class="features">
+            <li><span class="fe">⭕</span> Live usage rings &amp; projected month spend (widget + menu bar)</li>
+            <li><span class="fe">🎫</span> Per-run costs with Jira ticket/task + turn adequacy scoring</li>
+            <li><span class="fe">📈</span> Cursor breakdowns: rings, pie, trends, avg $/run</li>
+            <li><span class="fe">🧠</span> Offline <strong>Advice</strong> — routing hints, no extra API spend</li>
+            <li><span class="fe">🔄</span> Background sync from logs + optional provider APIs</li>
+            <li><span class="fe">⚙️</span> Settings: billing anchor, plans, keys, save &amp; sync</li>
+          </ul>
+        </div>
+        <div class="graphic-panel">
+          <span style="font-size: 3rem;">🛸</span>
+          <div class="mini-widget">
+            <strong>Token Monitor</strong>
+            Mo $42 · proj $118<br />
+            Cursor 67% · Codex 5h 41%
+          </div>
+          <p class="caption">Your floating HUD for AI spend</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-slide="2">
+      <span class="slide-watermark" aria-hidden="true">🧠</span>
+      <span class="badge">💸 Token economy · #1</span>
+      <div class="slide-head">
+        <div class="slide-icon">🎓</div>
+        <h2><span class="hl">Offline Advice</span> — know when to downshift models</h2>
+      </div>
+      <div class="two-col">
+        <div>
+          <p class="pitch" style="margin-bottom: 1rem;">
+            The <strong>Advice</strong> tab analyzes your billing-cycle runs locally—🚫 no Cursor agent,
+            no cloud LLM. It surfaces patterns where premium models met mechanical prompts
+            and where fast/Composer-class would’ve been enough.
+          </p>
+          <ul class="features">
+            <li><span class="fe">🏋️</span> <strong>Heaviest tickets</strong> — top 6 by tokens, title, $, model, Jira links</li>
+            <li><span class="fe">⚡</span> <strong>TL;DR routing</strong> — fast vs mid/premium for this cycle</li>
+            <li><span class="fe">📋</span> Spend concentration, downgrade candidates, habits</li>
+          </ul>
+          <p class="productivity">
+            <strong>🚀 Productivity:</strong> Stops “Opus for lint” before it becomes a habit.
+            One refresh replaces vibes with a coaching brief.
+          </p>
+        </div>
+        <div class="card mock">**Heaviest tickets by token usage:**
+- <span class="key">FTSWB-6018</span> — AMP embed iOS
+  (<span class="em">~1.2M tokens</span>, $4.50, 18 runs) · **sonnet-thinking**
+- <span class="key">FTSWB-5558</span> — …
+
+<strong>TL;DR:</strong> use fast models on lint, PR
+shepherd, merge cleanup; reserve premium
+for release risk &amp; architecture…</div>
+      </div>
+    </section>
+
+    <section class="slide" data-slide="3">
+      <span class="slide-watermark" aria-hidden="true">📊</span>
+      <span class="badge">📉 Token economy · #2</span>
+      <div class="slide-head">
+        <div class="slide-icon">🥧</div>
+        <h2>Cursor model views — <span class="hl">spot the expensive default</span></h2>
+      </div>
+      <div class="two-col">
+        <div>
+          <p class="pitch" style="margin-bottom: 1rem;">
+            In Usage details → Cursor: <strong>Rings, Pie, Over time, Per run</strong>.
+            See which models eat the cycle and who averages the most 💵 per agent turn.
+          </p>
+          <ul class="features">
+            <li><span class="fe">🍩</span> Share of spend per model (premium vs fast)</li>
+            <li><span class="fe">📅</span> Daily runs vs $ — spot spikes after workflow changes</li>
+            <li><span class="fe">📊</span> Per-run bars — wrong default? You’ll see it immediately</li>
+          </ul>
+          <p class="productivity">
+            <strong>🚀 Productivity:</strong> “Why is my cycle already at $200?” answered in seconds.
+            Fix defaults before the next sprint, not after the invoice.
+          </p>
+        </div>
+        <div class="card">
+          <h3>🔀 Four lenses</h3>
+          <ul>
+            <li>⭕ <strong>Rings</strong> — share of spend</li>
+            <li>🥧 <strong>Pie</strong> — same story, slide-friendly</li>
+            <li>📈 <strong>Over time</strong> — frequency vs cost</li>
+            <li>💲 <strong>Per run</strong> — avg $/run league table</li>
+          </ul>
+          <div class="chart-bars" aria-hidden="true" style="margin-top: 1rem;">
+            <span style="height: 55%;"></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-slide="4">
+      <span class="slide-watermark" aria-hidden="true">🎫</span>
+      <span class="badge">🎯 Focus &amp; quality</span>
+      <div class="slide-head">
+        <div class="slide-icon">📑</div>
+        <h2>Usage details — <span class="hl">tickets, adequacy, cost</span></h2>
+      </div>
+      <div class="two-col">
+        <div>
+          <p class="pitch" style="margin-bottom: 1rem;">
+            Every run maps to a user prompt. <strong>Ticket / task</strong> pulls Jira keys from
+            prompts or chat threads (🔗 click → Jira). <strong>Adequacy</strong> scores the turn
+            in context—not just word count.
+          </p>
+          <ul class="features">
+            <li><span class="fe">💰</span> Sort by cost, recency, or model</li>
+            <li><span class="fe">🔍</span> Filter provider + model; resizable columns</li>
+            <li><span class="fe">✅</span> Adequacy + role: kickoff, steer, approve, mech, recovery</li>
+            <li><span class="fe">↩️</span> Thread inheritance for “continue” / “tpr”</li>
+          </ul>
+          <p class="productivity">
+            <strong>🚀 Productivity:</strong> Spend ties to real tickets, not mystery threads.
+            Weak kickoffs get flagged before they multiply.
+          </p>
+        </div>
+        <div class="card mock">When · Provider · Ticket · Run · Adequacy
+… · Cursor · <span class="key">FTSWB-6018</span> · … · <span class="em">8/10 steer</span>
+… · Cursor · <span class="key">FTSWB-6018</span>↩ · continue · 9/10 approve</div>
+      </div>
+    </section>
+
+    <section class="slide" data-slide="5">
+      <span class="slide-watermark" aria-hidden="true">👁️</span>
+      <span class="badge">🔔 Always visible</span>
+      <div class="slide-head">
+        <div class="slide-icon">🛸</div>
+        <h2>Widget &amp; tray — <span class="hl">catch limit drift early</span></h2>
+      </div>
+      <div class="two-col">
+        <div>
+          <p class="pitch" style="margin-bottom: 1rem;">
+            Borderless floating widget stays on top—one ring per provider.
+            Month $ and projection always in view; click through to details or ⚙️ settings.
+          </p>
+          <ul class="features">
+            <li><span class="fe">🍎</span> Menu bar tray: widget, details, settings, sync, quit</li>
+            <li><span class="fe">📂</span> Codex / Claude Code file watchers + ~2 min poll</li>
+            <li><span class="fe">🔑</span> Cursor cookie sync; Copilot PAT when configured</li>
+            <li><span class="fe">🌅</span> Optional launch at login</li>
+          </ul>
+          <p class="productivity">
+            <strong>🚀 Productivity:</strong> See “80% of cycle” while you’re still in the editor—
+            not when the calendar says oops.
+          </p>
+        </div>
+        <div class="graphic-panel">
+          <span style="font-size: 2.5rem;">📟</span>
+          <div class="hero-rings" style="margin: 0; justify-content: center;">
+            <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="22" fill="none" stroke="#334155" stroke-width="5"/><circle cx="26" cy="26" r="22" fill="none" stroke="#f87171" stroke-width="5" stroke-dasharray="120 18" transform="rotate(-90 26 26)"/></svg>
+            <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="22" fill="none" stroke="#334155" stroke-width="5"/><circle cx="26" cy="26" r="22" fill="none" stroke="#34d399" stroke-width="5" stroke-dasharray="55 83" transform="rotate(-90 26 26)"/></svg>
+          </div>
+          <p class="caption">🔴 high · 🟢 chill — at a glance</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-slide="6">
+      <span class="slide-watermark" aria-hidden="true">🔁</span>
+      <span class="badge">🏁 Setup once · coach daily</span>
+      <div class="slide-head">
+        <div class="slide-icon">🔒</div>
+        <h2>Settings, privacy, <span class="hl">sustainable loop</span></h2>
+      </div>
+      <div class="two-col">
+        <div>
+          <p class="pitch" style="margin-bottom: 1rem;">
+            Configure once: billing anchor, providers, plans, Keychain keys.
+            <strong>Save &amp; sync</strong> ✅ persists and closes settings—data never leaves the Mac.
+          </p>
+          <ul class="features">
+            <li><span class="fe">🏠</span> On-device advice—no custom backend</li>
+            <li><span class="fe">✍️</span> Manual plan % when APIs aren’t available</li>
+            <li><span class="fe">🔁</span> Loop: sync → Advice → fix default → Per run check</li>
+          </ul>
+          <p class="productivity">
+            <strong>🚀 Productivity:</strong> 30-second ritual beats a policy doc nobody reads.
+            Token economy as a habit, not a lecture.
+          </p>
+        </div>
+        <div class="card">
+          <h3>🚀 Try it</h3>
+          <p style="color: var(--text); margin-bottom: 0.75rem;">
+            <code style="color: var(--emerald);">npm run tauri dev</code>
+          </p>
+          <p>Usage details → Cursor → <strong>Advice</strong> → 🔄 Refresh advice</p>
+          <p style="margin-top: 1rem; font-size: 2rem; text-align: center;">🎉</p>
+        </div>
+      </div>
+      <p class="pitch" style="margin-top: 1.5rem; font-size: 1rem;">
+        ❓ Questions? Demo live against your billing cycle—we dare you.
+      </p>
+    </section>
+  </div>
+
+  <nav class="nav" aria-label="Slide navigation">
+    <button type="button" id="prev" aria-label="Previous slide">◀️ Prev</button>
+    <span class="counter" id="counter">1 / 6</span>
+    <button type="button" id="next" aria-label="Next slide">Next ▶️</button>
+  </nav>
+
+  <script>
+    (function () {
+      const slides = Array.from(document.querySelectorAll(".slide"));
+      const total = slides.length;
+      let index = 0;
+      const counter = document.getElementById("counter");
+      const prev = document.getElementById("prev");
+      const next = document.getElementById("next");
+
+      function show(i) {
+        index = (i + total) % total;
+        slides.forEach((s, j) => s.classList.toggle("active", j === index));
+        counter.textContent = `${index + 1} / ${total}`;
+      }
+
+      prev.addEventListener("click", () => show(index - 1));
+      next.addEventListener("click", () => show(index + 1));
+
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") {
+          e.preventDefault();
+          show(index + 1);
+        }
+        if (e.key === "ArrowLeft" || e.key === "PageUp") {
+          e.preventDefault();
+          show(index - 1);
+        }
+        if (e.key === "Home") show(0);
+        if (e.key === "End") show(total - 1);
+      });
+
+      show(0);
+    })();
+  </script>
+</body>
+</html>

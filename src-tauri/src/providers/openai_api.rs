@@ -66,6 +66,9 @@ impl Provider for OpenAiProvider {
                     cache_tokens: 0,
                     cost_usd: cost,
                     title: "OpenAI org cost bucket".into(),
+                    conversation_id: String::new(),
+                    task_context: String::new(),
+                    task_inherited: false,
                 })?;
             }
         }

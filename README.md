@@ -4,6 +4,8 @@ Floating, always-on-top desktop widget that aggregates **AI token and plan usage
 
 Click the widget (or use the menu bar tray) to open a **details** view: runs sorted by estimated cost, with timestamps and models. Everything stays **local**—SQLite on disk, API keys in the **macOS Keychain**—no custom backend.
 
+**Slide deck:** [6-slide product overview (HTML)](docs/presentation/token-monitor-deck.html) — open in a browser; arrow keys or buttons to navigate.
+
 ---
 
 ## Features
@@ -197,7 +199,9 @@ Closing those windows used to destroy them. The app now **hides** them instead, 
 
 ### Widget resize
 
-The widget is resizable. Drag any edge, or the **bottom-right corner grip**. Content wraps as the window grows.
+**Widget** is a borderless floating panel (no traffic lights). Drag the header to move; drag edges to resize.
+
+**Settings** and **Usage details** use normal macOS window chrome (title bar + traffic lights + edge resize).
 
 ### Copilot shows “needs PAT”
 

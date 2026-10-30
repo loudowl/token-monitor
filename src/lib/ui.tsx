@@ -17,6 +17,13 @@ export function formatUsd(n: number | null | undefined) {
   return `$${n.toFixed(2)}`;
 }
 
+export function formatUsdPerRun(n: number | null | undefined) {
+  if (n == null) return "—";
+  if (n >= 1) return `$${n.toFixed(2)}`;
+  if (n >= 0.01) return `$${n.toFixed(3)}`;
+  return `$${n.toFixed(4)}`;
+}
+
 /** Compact dollars for small ring labels */
 export function formatUsdCompact(n: number | null | undefined) {
   if (n == null) return "—";
@@ -43,21 +50,31 @@ export function Ring({
   label,
   sub,
   size = 44,
+  layoutWidth,
+  fillColumn,
   center,
   centerClassName,
   title,
   styledTooltip,
+  className,
+  labelClassName,
   onClick,
 }: {
   pct: number | null;
   label: string;
   sub?: string;
   size?: number;
+  /** Wider column for labels; circle stays `size` and centered. */
+  layoutWidth?: number;
+  /** Use full grid/flex column width (circle still fixed `size`). */
+  fillColumn?: boolean;
   center?: string;
   centerClassName?: string;
   title?: string;
   /** Use a styled hover tooltip instead of the native `title` attribute. */
   styledTooltip?: boolean;
+  className?: string;
+  labelClassName?: string;
   onClick?: () => void;
 }) {
   const stroke = Math.max(3, Math.round(size * 0.09));
@@ -73,15 +90,20 @@ export function Ring({
   const ringTitle =
     title ?? (onClick && !center ? `Open ${label} details` : undefined);
   const nativeTitle = styledTooltip ? undefined : ringTitle;
+  const outerWidth = layoutWidth ?? size;
 
   return (
     <div
       className={clsx(
-        "flex flex-col items-center gap-0.5 rounded-md px-0.5 shrink-0",
+        "flex flex-col items-center gap-0.5 rounded-md px-1 shrink-0 mx-auto",
+        fillColumn && "w-full",
         onClick && "cursor-pointer hover:bg-white/5",
         styledTooltip && title && "relative group",
+        className,
       )}
-      style={{ width: size, maxWidth: "100%" }}
+      style={
+        fillColumn ? undefined : { width: outerWidth, maxWidth: "100%" }
+      }
       data-no-drag={onClick ? true : undefined}
       onClick={onClick}
       onMouseDown={(e) => onClick && e.stopPropagation()}
@@ -91,7 +113,7 @@ export function Ring({
       {styledTooltip && title ? (
         <div
           role="tooltip"
-          className="pointer-events-none absolute left-1/2 bottom-full -translate-x-1/2 mb-1.5 z-50 rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-[13px] leading-snug text-slate-100 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity max-w-[min(20rem,calc(100vw-2rem))] text-center whitespace-normal"
+          className="pointer-events-none absolute left-1/2 bottom-full -translate-x-1/2 mb-1.5 z-50 rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-[13px] leading-snug text-slate-100 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
         >
           {title}
         </div>
@@ -130,7 +152,10 @@ export function Ring({
         </span>
       </div>
       <span
-        className="font-medium text-slate-200 leading-tight text-center w-full truncate px-0.5"
+        className={clsx(
+          "font-medium text-slate-200 leading-tight text-center w-full px-0.5",
+          labelClassName ?? "truncate",
+        )}
         style={{ fontSize: labelFont }}
       >
         {label}

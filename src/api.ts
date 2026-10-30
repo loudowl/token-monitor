@@ -11,6 +11,9 @@ export interface RunRecord {
   cache_tokens: number;
   cost_usd: number;
   title: string;
+  conversation_id?: string;
+  task_context?: string;
+  task_inherited?: boolean;
 }
 
 export interface QuotaSnapshot {
@@ -41,6 +44,26 @@ export interface ModelUsageRow {
   model: string;
   cost_usd: number;
   share_percent: number;
+  run_count: number;
+}
+
+export interface ModelUsagePoint {
+  day: string;
+  model: string;
+  run_count: number;
+  cost_usd: number;
+}
+
+export interface ModelUsageSeries {
+  cycle_start: string;
+  points: ModelUsagePoint[];
+}
+
+export interface ModelUsageAdvice {
+  text: string;
+  generated_at: string;
+  model_used: string;
+  provider_used: string;
 }
 
 export interface ManualPlanEntry {
@@ -57,6 +80,7 @@ export interface AppSettings {
   plans: ManualPlanEntry[];
   alert_threshold_percent: number;
   github_username: string | null;
+  github_org: string | null;
   widget_x: number | null;
   widget_y: number | null;
 }
@@ -89,14 +113,29 @@ export function syncNow() {
 
 export function listRuns(opts?: {
   provider?: string;
+  model?: string;
   limit?: number;
   sort?: string;
 }) {
   return invoke<RunRecord[]>("list_runs", { ...opts });
 }
 
+export function listUsedModels(provider?: string) {
+  return invoke<string[]>("list_used_models", { provider: provider ?? null });
+}
+
 export function getProviderModelUsage(provider: string) {
   return invoke<ModelUsageRow[]>("get_provider_model_usage", { provider });
+}
+
+export function getProviderModelUsageSeries(provider: string) {
+  return invoke<ModelUsageSeries>("get_provider_model_usage_series", {
+    provider,
+  });
+}
+
+export function generateCursorModelAdvice() {
+  return invoke<ModelUsageAdvice>("generate_cursor_model_advice");
 }
 
 export function getSettings() {
@@ -127,8 +166,21 @@ export interface CursorProbeResult {
   error: string | null;
 }
 
+export interface CopilotProbeResult {
+  ok: boolean;
+  used_requests: number;
+  limit_requests: number;
+  percent: number | null;
+  source: string | null;
+  error: string | null;
+}
+
 export function testCursorAuth() {
   return invoke<CursorProbeResult>("test_cursor_auth");
+}
+
+export function testCopilotAuth() {
+  return invoke<CopilotProbeResult>("test_copilot_auth");
 }
 
 export function connectCursor() {
@@ -140,6 +192,11 @@ export function showWindow(
   provider?: string,
 ) {
   return invoke<void>("show_window", { label, provider: provider ?? null });
+}
+
+export async function hideCurrentWindow() {
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().hide();
 }
 
 export function saveWidgetPosition(x: number, y: number) {

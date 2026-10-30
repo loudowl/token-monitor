@@ -52,6 +52,9 @@ impl Provider for XaiProvider {
                 cache_tokens: 0,
                 cost_usd: spend,
                 title: "xAI usage snapshot".into(),
+                conversation_id: String::new(),
+                task_context: String::new(),
+                task_inherited: false,
             })?;
         }
         Ok(())

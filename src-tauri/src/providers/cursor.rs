@@ -1034,6 +1034,9 @@ fn ingest_events(db: &Db, events: &[Value], titles: &[String]) -> Result<u32> {
             } else {
                 title.clone()
             },
+            conversation_id: conversation_id(ev).unwrap_or("").to_string(),
+            task_context: String::new(),
+            task_inherited: false,
         })?;
         n += 1;
     }
@@ -1235,6 +1238,9 @@ async fn sync_with_session(
                         cache_tokens: cache,
                         cost_usd: cost,
                         title: "Aggregated Cursor usage".into(),
+                        conversation_id: String::new(),
+                        task_context: String::new(),
+                        task_inherited: false,
                     })
                     .map_err(|e| e.to_string())?;
                     events_count += 1;

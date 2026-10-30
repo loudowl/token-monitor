@@ -25,6 +25,7 @@
         "alwaysOnTop": true,
         "resizable": true,
         "skipTaskbar": true,
+        "shadow": true,
         "visible": true
       },
       {
@@ -33,6 +34,10 @@
         "url": "/details",
         "width": 960,
         "height": 720,
+        "minWidth": 520,
+        "minHeight": 400,
+        "decorations": true,
+        "resizable": true,
         "visible": false,
         "center": true
       },
@@ -42,6 +47,10 @@
         "url": "/settings",
         "width": 640,
         "height": 760,
+        "minWidth": 420,
+        "minHeight": 480,
+        "decorations": true,
+        "resizable": true,
         "visible": false,
         "center": true
       }

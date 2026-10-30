@@ -7,8 +7,11 @@ import {
   secretConfigured,
   setSecret,
   syncNow,
+  hideCurrentWindow,
   testCursorAuth,
+  testCopilotAuth,
   connectCursor,
+  type CopilotProbeResult,
   type CursorProbeResult,
   type AppSettings,
   type ProviderPlan,
@@ -43,8 +46,9 @@ const SECRETS: {
     urlLabel: "Create a GitHub token",
     steps: [
       "GitHub → Settings → Developer settings → Personal access tokens.",
-      "Create a fine-grained token for your user with Account → Plan (or Billing) read permission.",
-      "Paste the token here and set your GitHub username above.",
+      "Create a fine-grained token with Account → Plan / Billing read (or classic token with read:user).",
+      "If Copilot is billed through your employer org, set GitHub org below and use a token with org billing read.",
+      "Paste the token here and set your GitHub username (or leave blank to use the token owner).",
     ],
   },
   {
@@ -93,7 +97,9 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [cursorProbe, setCursorProbe] = useState<CursorProbeResult | null>(null);
+  const [copilotProbe, setCopilotProbe] = useState<CopilotProbeResult | null>(null);
   const [cursorConnecting, setCursorConnecting] = useState(false);
+  const [copilotTesting, setCopilotTesting] = useState(false);
 
   useEffect(() => {
     Promise.all([getSettings(), getPlanCatalog()]).then(([s, c]) => {
@@ -109,7 +115,9 @@ export default function SettingsPage() {
 
   if (!settings) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-400 p-8">Loading settings…</div>
+      <div className="min-h-screen bg-slate-950 text-slate-400 p-8">
+        Loading settings…
+      </div>
     );
   }
 
@@ -147,7 +155,8 @@ export default function SettingsPage() {
         setSaveError(probe.error || "Cursor cookie was not accepted.");
       }
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      setTimeout(() => setSaved(false), 800);
+      await hideCurrentWindow();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     }
@@ -226,6 +235,22 @@ export default function SettingsPage() {
             placeholder="loudowl"
           />
         </label>
+        <label className="flex items-center gap-3 text-sm mt-3">
+          GitHub org (org-billed Copilot)
+          <input
+            type="text"
+            value={settings.github_org ?? ""}
+            onChange={(e) =>
+              setSettings({ ...settings, github_org: e.target.value || null })
+            }
+            className="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1"
+            placeholder="my-company (optional)"
+          />
+        </label>
+        <p className="text-xs text-slate-500 mt-2">
+          Personal Copilot plans use your user billing API. If your license is through a
+          company org, enter the org slug and use a PAT that can read that org&apos;s billing.
+        </p>
       </section>
 
       <section className="mb-8">
@@ -312,6 +337,41 @@ export default function SettingsPage() {
             />
           </div>
         ))}
+        <button
+          type="button"
+          disabled={copilotTesting}
+          onClick={async () => {
+            setSaveError(null);
+            setCopilotTesting(true);
+            try {
+              const probe = await testCopilotAuth();
+              setCopilotProbe(probe);
+              if (probe.ok) {
+                await syncNow();
+              }
+            } catch (err) {
+              setSaveError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setCopilotTesting(false);
+            }
+          }}
+          className="mt-2 w-full py-2 rounded-lg border border-slate-600 text-slate-200 hover:bg-slate-800 font-medium text-sm disabled:opacity-60"
+        >
+          {copilotTesting ? "Testing Copilot billing…" : "Test GitHub Copilot billing"}
+        </button>
+        {copilotProbe ? (
+          <div
+            className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+              copilotProbe.ok
+                ? "border-emerald-800 bg-emerald-950/40 text-emerald-300"
+                : "border-rose-800 bg-rose-950/40 text-rose-300"
+            }`}
+          >
+            {copilotProbe.ok
+              ? `Copilot ${copilotProbe.used_requests} / ${copilotProbe.limit_requests} premium requests${copilotProbe.percent != null ? ` · ${copilotProbe.percent.toFixed(0)}%` : ""}${copilotProbe.source ? ` · ${copilotProbe.source}` : ""}`
+              : `Copilot billing failed: ${copilotProbe.error}`}
+          </div>
+        ) : null}
       </section>
 
       <section className="mb-8">

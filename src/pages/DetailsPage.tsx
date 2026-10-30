@@ -4,15 +4,23 @@ import { listen } from "@tauri-apps/api/event";
 import {
   getUsageSummary,
   getProviderModelUsage,
+  getProviderModelUsageSeries,
   listRuns,
+  listUsedModels,
   syncNow,
   type ModelUsageRow,
+  type ModelUsageSeries,
   type RunRecord,
   type UsageSummary,
   PROVIDERS,
 } from "../api";
 import { formatPct, formatUsd, providerLabel, pctColor } from "../lib/ui";
-import { promptSpecificityScore, specificityColor } from "../lib/specificity";
+import {
+  adequacyColor,
+  buildThreadPeakMap,
+  promptAdequacy,
+} from "../lib/promptAdequacy";
+import { deriveTaskContext, isJiraKey, openJiraIssue, taskContextTooltip } from "../lib/taskContext";
 import { useResizableColumns } from "../lib/useResizableColumns";
 import PromptCell from "../components/PromptCell";
 import ResizableTh from "../components/ResizableTh";
@@ -23,10 +31,11 @@ export type RunSort = "cost" | "cost_asc" | "started_at" | "model";
 
 const DETAILS_COL_DEFAULTS = {
   when: 132,
-  provider: 108,
-  run: 320,
-  specificity: 96,
-  model: 148,
+  provider: 96,
+  task: 128,
+  run: 280,
+  adequacy: 96,
+  model: 140,
   tokens: 88,
   cost: 72,
 } as const;
@@ -37,8 +46,11 @@ export default function DetailsPage() {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [modelUsage, setModelUsage] = useState<ModelUsageRow[]>([]);
+  const [modelSeries, setModelSeries] = useState<ModelUsageSeries | null>(null);
   const [provider, setProvider] = useState<string>("all");
-  const [sort, setSort] = useState<RunSort>("cost");
+  const [sort, setSort] = useState<RunSort>("started_at");
+  const [modelFilter, setModelFilter] = useState("");
+  const [usedModels, setUsedModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const { widths, keys, onResizeStart } = useResizableColumns<DetailsCol>(
@@ -49,28 +61,43 @@ export default function DetailsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, r, models] = await Promise.all([
+      const providerArg = provider === "all" ? undefined : provider;
+      const [s, r, models, series, modelNames] = await Promise.all([
         getUsageSummary(),
         listRuns({
-          provider: provider === "all" ? undefined : provider,
-          limit: 250,
+          provider: providerArg,
+          model: modelFilter || undefined,
+          limit: modelFilter ? 2000 : 250,
           sort,
         }),
         provider === "cursor"
           ? getProviderModelUsage("cursor")
           : Promise.resolve([] as ModelUsageRow[]),
+        provider === "cursor"
+          ? getProviderModelUsageSeries("cursor")
+          : Promise.resolve(null as ModelUsageSeries | null),
+        listUsedModels(providerArg),
       ]);
       setSummary(s);
       setRuns(r);
       setModelUsage(models);
+      setModelSeries(series);
+      setUsedModels(modelNames);
+      if (modelFilter && !modelNames.includes(modelFilter)) {
+        setModelFilter("");
+      }
     } finally {
       setLoading(false);
     }
-  }, [provider, sort]);
+  }, [provider, sort, modelFilter]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    setModelFilter("");
+  }, [provider]);
 
   useEffect(() => {
     const unlisten = listen<string>("details-filter", (e) => {
@@ -91,6 +118,8 @@ export default function DetailsPage() {
       { cost: 0, tokens: 0 },
     );
   }, [runs]);
+
+  const threadPeaks = useMemo(() => buildThreadPeakMap(runs), [runs]);
 
   const sortLabel =
     sort === "cost"
@@ -139,7 +168,7 @@ export default function DetailsPage() {
       </div>
 
       {provider === "cursor" && !loading ? (
-        <CursorModelUsageRings rows={modelUsage} />
+        <CursorModelUsageRings rows={modelUsage} series={modelSeries} />
       ) : null}
 
       <div className="flex gap-3 mb-4 text-sm">
@@ -154,6 +183,22 @@ export default function DetailsPage() {
             <option value="cost_asc">Least expensive</option>
             <option value="started_at">Most recent</option>
             <option value="model">Model (A–Z)</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-slate-400">
+          Model
+          <select
+            value={modelFilter}
+            onChange={(e) => setModelFilter(e.target.value)}
+            className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-slate-200 max-w-[min(20rem,50vw)]"
+            disabled={usedModels.length === 0}
+          >
+            <option value="">All models</option>
+            {usedModels.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
           </select>
         </label>
         <span className="text-slate-500">
@@ -176,12 +221,15 @@ export default function DetailsPage() {
               <ResizableTh onResizeStart={(x) => onResizeStart("provider", x)}>
                 Provider
               </ResizableTh>
+              <ResizableTh onResizeStart={(x) => onResizeStart("task", x)}>
+                Ticket / task
+              </ResizableTh>
               <ResizableTh onResizeStart={(x) => onResizeStart("run", x)}>Run</ResizableTh>
               <ResizableTh
                 className="text-right"
-                onResizeStart={(x) => onResizeStart("specificity", x)}
+                onResizeStart={(x) => onResizeStart("adequacy", x)}
               >
-                Specificity
+                Adequacy
               </ResizableTh>
               <ResizableTh onResizeStart={(x) => onResizeStart("model", x)}>
                 Model
@@ -203,13 +251,13 @@ export default function DetailsPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
                   Loading…
                 </td>
               </tr>
             ) : runs.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
                   No runs for this provider yet. Add API keys in Settings and
                   click Sync now — Codex and Claude Code also ingest local
                   session logs automatically.
@@ -219,7 +267,8 @@ export default function DetailsPage() {
               runs.map((r) => {
                 const tokens = r.input_tokens + r.output_tokens + r.cache_tokens;
                 const prompt = r.title || r.run_id;
-                const specificity = promptSpecificityScore(prompt);
+                const task = deriveTaskContext(r);
+                const adequacy = promptAdequacy(r, runs, threadPeaks);
                 let when = r.started_at;
                 try {
                   when = format(new Date(r.started_at), "MMM d, yyyy HH:mm");
@@ -235,17 +284,48 @@ export default function DetailsPage() {
                       {when}
                     </td>
                     <td className="px-3 py-2">{providerLabel(r.provider)}</td>
+                    <td
+                      className="px-3 py-2 align-top min-w-0"
+                      title={taskContextTooltip(r)}
+                    >
+                      {isJiraKey(task.label) ? (
+                        <button
+                          type="button"
+                          onClick={() => void openJiraIssue(task.label)}
+                          className={clsx(
+                            "text-xs leading-snug block truncate max-w-full text-left",
+                            "font-mono text-indigo-300 hover:text-indigo-200 hover:underline",
+                            "cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500 rounded-sm",
+                            task.inherited && "italic",
+                          )}
+                        >
+                          {task.label}
+                          {task.inherited ? " ↩" : null}
+                        </button>
+                      ) : (
+                        <span
+                          className={clsx(
+                            "text-xs leading-snug block truncate max-w-full text-slate-400",
+                          )}
+                        >
+                          {task.label}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-2 py-1.5 align-top min-w-0">
                       <PromptCell text={prompt} />
                     </td>
                     <td
                       className={clsx(
-                        "px-3 py-2 text-right tabular-nums font-medium",
-                        specificityColor(specificity),
+                        "px-3 py-2 text-right tabular-nums font-medium whitespace-nowrap",
+                        adequacyColor(adequacy.score),
                       )}
-                      title="1 = vague · 10 = highly specific context"
+                      title={adequacy.tooltip}
                     >
-                      {specificity}/10
+                      {adequacy.score}/10
+                      <span className="ml-1 text-[10px] font-normal text-slate-500 uppercase tracking-wide">
+                        {adequacy.roleShort}
+                      </span>
                     </td>
                     <td className="px-3 py-2 font-mono text-xs text-slate-400">{r.model}</td>
                     <td className="px-3 py-2 text-right tabular-nums">

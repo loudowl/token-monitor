@@ -11,6 +11,12 @@ pub struct RunRecord {
     pub cache_tokens: i64,
     pub cost_usd: f64,
     pub title: String,
+    #[serde(default)]
+    pub conversation_id: String,
+    #[serde(default)]
+    pub task_context: String,
+    #[serde(default)]
+    pub task_inherited: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +24,29 @@ pub struct ModelUsageRow {
     pub model: String,
     pub cost_usd: f64,
     pub share_percent: f64,
+    pub run_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelUsagePoint {
+    pub day: String,
+    pub model: String,
+    pub run_count: i64,
+    pub cost_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelUsageSeries {
+    pub cycle_start: String,
+    pub points: Vec<ModelUsagePoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelUsageAdvice {
+    pub text: String,
+    pub generated_at: String,
+    pub model_used: String,
+    pub provider_used: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +84,8 @@ pub struct AppSettings {
     pub plans: Vec<ManualPlanEntry>,
     pub alert_threshold_percent: f64,
     pub github_username: Option<String>,
+    /// Org slug when Copilot is billed through a GitHub organization (not personal).
+    pub github_org: Option<String>,
     pub widget_x: Option<f64>,
     pub widget_y: Option<f64>,
 }
@@ -84,6 +115,7 @@ impl Default for AppSettings {
             plans: default_manual_plans(),
             alert_threshold_percent: 80.0,
             github_username: None,
+            github_org: None,
             widget_x: None,
             widget_y: None,
         }

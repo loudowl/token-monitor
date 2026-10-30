@@ -77,6 +77,8 @@ pub fn spawn_file_watchers(app: AppHandle, engine: Arc<SyncEngine>) {
         let mut paths: Vec<PathBuf> = Vec::new();
         if let Some(h) = dirs::home_dir() {
             paths.push(h.join(".codex").join("sessions"));
+            paths.push(h.join(".codex").join("archived_sessions"));
+            paths.push(h.join(".codex").join("auth.json"));
             paths.push(h.join(".claude").join("projects"));
         }
 

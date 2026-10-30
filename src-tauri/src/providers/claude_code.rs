@@ -86,6 +86,9 @@ impl Provider for ClaudeCodeProvider {
                 cache_tokens: agg.cache,
                 cost_usd: cost,
                 title,
+                conversation_id: String::new(),
+                task_context: String::new(),
+                task_inherited: false,
             })?;
         }
         Ok(())
